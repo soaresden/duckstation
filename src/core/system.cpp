@@ -60,6 +60,9 @@ struct MemorySaveState
   std::unique_ptr<GrowableMemoryByteStream> state_stream;
 };
 
+static bool SaveMemoryState(MemorySaveState* mss);
+static bool LoadMemoryState(const MemorySaveState& mss);
+
 static bool LoadEXE(const char* filename);
 static bool SetExpansionROM(const char* filename);
 
@@ -69,9 +72,15 @@ static std::unique_ptr<CDImage> OpenCDImage(const char* path, bool force_preload
 static bool DoLoadState(ByteStream* stream, bool force_software_renderer, bool update_display);
 static bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display);
 static void DoRunFrame();
-static void DoRewind();
-static void DoMemorySaveStates();
 static bool CreateGPU(GPURenderer renderer);
+
+static bool SaveRewindState();
+static void DoRewind();
+
+static void SaveRunaheadState();
+static void DoRunahead();
+
+static void DoMemorySaveStates();
 
 static bool Initialize(bool force_software_renderer);
 
@@ -124,6 +133,11 @@ static s32 s_rewind_load_counter = -1;
 static s32 s_rewind_save_frequency = -1;
 static s32 s_rewind_save_counter = -1;
 static bool s_rewinding_first_save = false;
+
+static std::deque<MemorySaveState> s_runahead_states;
+static std::unique_ptr<AudioStream> s_runahead_audio_stream;
+static bool s_runahead_replay_pending = false;
+static u32 s_runahead_frames = 0;
 
 State GetState()
 {
@@ -834,6 +848,7 @@ void Shutdown()
     return;
 
   ClearMemorySaveStates();
+  s_runahead_audio_stream.reset();
 
   g_texture_replacements.Shutdown();
 
@@ -1149,6 +1164,7 @@ bool DoLoadState(ByteStream* state, bool force_software_renderer, bool update_di
   if (s_state == State::Starting)
     s_state = State::Running;
 
+  g_host_interface->GetAudioStream()->EmptyBuffers();
   return true;
 }
 
@@ -1299,6 +1315,9 @@ void RunFrame()
     DoRewind();
     return;
   }
+
+  if (s_runahead_frames > 0)
+    DoRunahead();
 
   DoRunFrame();
 
@@ -1959,6 +1978,7 @@ void CalculateRewindMemoryUsage(u32 num_saves, u64* ram_usage, u64* vram_usage)
 void ClearMemorySaveStates()
 {
   s_rewind_states.clear();
+  s_runahead_states.clear();
 }
 
 void UpdateMemorySaveStateSettings()
@@ -1983,6 +2003,60 @@ void UpdateMemorySaveStateSettings()
     s_rewind_save_frequency = -1;
     s_rewind_save_counter = -1;
   }
+
+  s_rewind_load_frequency = -1;
+  s_rewind_load_counter = -1;
+
+  s_runahead_frames = g_settings.runahead_enable ? g_settings.runahead_frames : 0;
+  s_runahead_replay_pending = false;
+  if (s_runahead_frames > 0)
+  {
+    Log_InfoPrintf("Runahead is active with %u frames", s_runahead_frames);
+
+    if (!s_runahead_audio_stream)
+    {
+      // doesn't matter if it's not resampled here since it eats everything anyway, nom nom nom.
+      s_runahead_audio_stream = AudioStream::CreateNullAudioStream();
+      s_runahead_audio_stream->Reconfigure(HostInterface::AUDIO_SAMPLE_RATE, HostInterface::AUDIO_SAMPLE_RATE,
+                                           HostInterface::AUDIO_CHANNELS);
+    }
+  }
+  else
+  {
+    s_runahead_audio_stream.reset();
+  }
+}
+
+bool LoadMemoryState(const MemorySaveState& mss)
+{
+  mss.state_stream->SeekAbsolute(0);
+
+  StateWrapper sw(mss.state_stream.get(), StateWrapper::Mode::Read, SAVE_STATE_VERSION);
+  HostDisplayTexture* host_texture = mss.vram_texture.get();
+  if (!DoState(sw, &host_texture, true))
+  {
+    g_host_interface->ReportError("Failed to load memory save state, resetting.");
+    Reset();
+    return false;
+  }
+
+  return true;
+}
+
+bool SaveMemoryState(MemorySaveState* mss)
+{
+  mss->state_stream = std::make_unique<GrowableMemoryByteStream>(nullptr, MAX_SAVE_STATE_SIZE);
+
+  HostDisplayTexture* host_texture = nullptr;
+  StateWrapper sw(mss->state_stream.get(), StateWrapper::Mode::Write, SAVE_STATE_VERSION);
+  if (!DoState(sw, &host_texture, false))
+  {
+    Log_ErrorPrint("Failed to create rewind state.");
+    return false;
+  }
+
+  mss->vram_texture.reset(host_texture);
+  return true;
 }
 
 bool SaveRewindState()
@@ -1994,17 +2068,9 @@ bool SaveRewindState()
     s_rewind_states.pop_front();
 
   MemorySaveState mss;
-  mss.state_stream = std::make_unique<GrowableMemoryByteStream>(nullptr, MAX_SAVE_STATE_SIZE);
-
-  HostDisplayTexture* host_texture = nullptr;
-  StateWrapper sw(mss.state_stream.get(), StateWrapper::Mode::Write, SAVE_STATE_VERSION);
-  if (!DoState(sw, &host_texture, false))
-  {
-    Log_ErrorPrint("Failed to create rewind state.");
+  if (!SaveMemoryState(&mss))
     return false;
-  }
 
-  mss.vram_texture.reset(host_texture);
   s_rewind_states.push_back(std::move(mss));
 
   Log_DevPrintf("Saved rewind state (%u bytes, took %.4f ms)", s_rewind_states.back().state_stream->GetSize(),
@@ -2026,17 +2092,8 @@ bool LoadRewindState(u32 skip_saves /*= 0*/, bool consume_state /*=true */)
 
   Common::Timer load_timer;
 
-  const MemorySaveState& mss = s_rewind_states.back();
-  mss.state_stream->SeekAbsolute(0);
-
-  StateWrapper sw(mss.state_stream.get(), StateWrapper::Mode::Read, SAVE_STATE_VERSION);
-  HostDisplayTexture* host_texture = mss.vram_texture.get();
-  if (!DoState(sw, &host_texture, true))
-  {
-    g_host_interface->ReportError("Failed to load rewind state from memory, resetting.");
-    Reset();
+  if (!LoadMemoryState(s_rewind_states.back()))
     return false;
-  }
 
   if (consume_state)
     s_rewind_states.pop_back();
@@ -2081,6 +2138,68 @@ void DoRewind()
   }
 }
 
+void SaveRunaheadState()
+{
+  if (s_runahead_states.size() >= s_runahead_frames)
+    s_runahead_states.pop_front();
+
+  MemorySaveState mss;
+  if (!SaveMemoryState(&mss))
+  {
+    Log_ErrorPrint("Failed to save runahead state.");
+    return;
+  }
+
+  s_runahead_states.push_back(std::move(mss));
+}
+
+void DoRunahead()
+{
+  Common::Timer timer;
+  Log_DevPrintf("runahead starting at frame %u", s_frame_number);
+
+  if (s_runahead_replay_pending)
+  {
+    // we need to replay and catch up - load the state,
+    s_runahead_replay_pending = false;
+    if (!LoadMemoryState(s_runahead_states.front()))
+      return;
+
+    // and throw away all the states, forcing us to catch up below
+    // TODO: can we leave one frame here and run, avoiding the extra save?
+    s_runahead_states.clear();
+    Log_VerbosePrintf("Rewound to frame %u, took %.2f ms", s_frame_number, timer.GetTimeMilliseconds());
+  }
+
+  // run the frames with no audio
+  s32 frames_to_run = static_cast<s32>(s_runahead_frames) - static_cast<s32>(s_runahead_states.size());
+  if (frames_to_run > 0)
+  {
+    Common::Timer timer2;
+    const s32 temp = frames_to_run;
+
+    g_spu.SetAudioStream(s_runahead_audio_stream.get());
+
+    while (frames_to_run > 0)
+    {
+      DoRunFrame();
+      SaveRunaheadState();
+      frames_to_run--;
+    }
+
+    g_spu.SetAudioStream(g_host_interface->GetAudioStream());
+
+    Log_VerbosePrintf("Running %d frames to catch up took %.2f ms", temp, timer2.GetTimeMilliseconds());
+  }
+  else
+  {
+    // save this frame
+    SaveRunaheadState();
+  }
+
+  Log_DevPrintf("runahead ending at frame %u, took %.2f ms", s_frame_number, timer.GetTimeMilliseconds());
+}
+
 void DoMemorySaveStates()
 {
   if (s_rewind_save_counter >= 0)
@@ -2095,6 +2214,15 @@ void DoMemorySaveStates()
       s_rewind_save_counter--;
     }
   }
+
+  if (s_runahead_frames > 0)
+    SaveRunaheadState();
+}
+
+void SetRunaheadReplayFlag()
+{
+  Log_DevPrintf("Runahead rewind pending...");
+  s_runahead_replay_pending = true;
 }
 
 } // namespace System
