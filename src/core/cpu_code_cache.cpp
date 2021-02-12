@@ -46,6 +46,7 @@ static JitCodeBuffer s_code_buffer;
 std::array<CodeBlock::HostCodePointer, FAST_MAP_TOTAL_SLOT_COUNT> s_fast_map;
 DispatcherFunction s_asm_dispatcher;
 SingleBlockDispatcherFunction s_single_block_asm_dispatcher;
+void* s_asm_dispatcher_next_block;
 
 ALWAYS_INLINE static u32 GetFastMapIndex(u32 pc)
 {
@@ -89,8 +90,8 @@ static void RemoveReferencesToBlock(CodeBlock* block);
 static void AddBlockToPageMap(CodeBlock* block);
 static void RemoveBlockFromPageMap(CodeBlock* block);
 
-/// Link block from to to.
-static void LinkBlock(CodeBlock* from, CodeBlock* to);
+/// Link block from to to. Returns the successor index.
+static void LinkBlock(CodeBlock* from, CodeBlock* to, void* host_pc, void* host_resolve_pc, u32 host_pc_size);
 
 /// Unlink all blocks which point to this block, and any that this block links to.
 static void UnlinkBlock(CodeBlock* block);
@@ -232,8 +233,9 @@ static void ExecuteImpl()
       {
         // Try to find an already-linked block.
         // TODO: Don't need to dereference the block, just store a pointer to the code.
-        for (CodeBlock* linked_block : block->link_successors)
+        for (const CodeBlock::LinkInfo& li : block->link_successors)
         {
+          CodeBlock* linked_block = li.block;
           if (linked_block->key.bits == next_block_key.bits)
           {
             if (linked_block->invalidated && !RevalidateBlock(linked_block))
@@ -253,7 +255,7 @@ static void ExecuteImpl()
         if (next_block)
         {
           // Link the previous block to this new block if we find a new block.
-          LinkBlock(block, next_block);
+          LinkBlock(block, next_block, nullptr, nullptr, 0);
           block = next_block;
           goto reexecute_block;
         }
@@ -288,7 +290,7 @@ void CompileDispatcher()
 {
   {
     Recompiler::CodeGenerator cg(&s_code_buffer);
-    s_asm_dispatcher = cg.CompileDispatcher();
+    s_asm_dispatcher = cg.CompileDispatcher(&s_asm_dispatcher_next_block);
   }
   {
     Recompiler::CodeGenerator cg(&s_code_buffer);
@@ -306,7 +308,7 @@ void ExecuteRecompiler()
   g_using_interpreter = false;
   g_state.frame_done = false;
 
-#if 0
+#if 1
   while (!g_state.frame_done)
   {
     if (HasPendingInterrupt())
@@ -323,6 +325,11 @@ void ExecuteRecompiler()
       g_state.current_instruction_pc = pc;
 #if 0
       if (pc == 0xbfc0d444)
+        __debugbreak();
+#endif
+#if 1
+      const u32 tick = TimingEvents::GetGlobalTickCounter() + CPU::GetPendingTicks();
+      if (tick == 1695548810)
         __debugbreak();
 #endif
       const u32 fast_map_index = GetFastMapIndex(pc);
@@ -498,7 +505,7 @@ bool CompileBlock(CodeBlock* block)
   bool is_load_delay_slot = false;
 
 #if 0
-  if (pc == 0x0005aa90)
+  if (pc == 0x8003E1F8)
     __debugbreak();
 #endif
 
@@ -525,22 +532,6 @@ bool CompileBlock(CodeBlock* block)
     cbi.has_load_delay = InstructionHasLoadDelay(cbi.instruction);
     cbi.can_trap = CanInstructionTrap(cbi.instruction, InUserMode());
     cbi.is_direct_branch_instruction = IsDirectBranchInstruction(cbi.instruction);
-    if (cbi.is_direct_branch_instruction && true)
-    {
-      // backwards branch?
-      VirtualMemoryAddress branch_pc = GetDirectBranchTarget(cbi.instruction, cbi.pc);
-      for (CodeBlockInstruction& other_cbi : block->instructions)
-      {
-        if (other_cbi.pc == branch_pc)
-        {
-          other_cbi.is_direct_branch_target = true;
-          cbi.is_direct_branch_in_block = true;
-          block->has_in_block_branches = true;
-          Log_InfoPrintf("Found reverse branch from %08X to %08X", cbi.pc, branch_pc);
-          break;
-        }
-      }
-    }
 
     if (g_settings.cpu_recompiler_icache)
     {
@@ -611,17 +602,6 @@ bool CompileBlock(CodeBlock* block)
                       cbi.is_load_delay_slot ? "LD" : "  ", cbi.pc, cbi.instruction.bits, disasm.GetCharArray());
     }
 #endif
-
-    if (block->instructions.size() >= 2)
-    {
-      Log_InfoPrintf("%08X -> %08X", block->instructions.front().pc, block->instructions.back().pc);
-
-      const auto& cbi = block->instructions[block->instructions.size() - 2];
-      SmallString disasm;
-      CPU::DisassembleInstruction(&disasm, cbi.pc, cbi.instruction.bits);
-      Log_InfoPrintf("[%s %s 0x%08X] %08X %s", cbi.is_branch_delay_slot ? "BD" : "  ",
-        cbi.is_load_delay_slot ? "LD" : "  ", cbi.pc, cbi.instruction.bits, disasm.GetCharArray());
-    }
   }
   else
   {
@@ -740,28 +720,55 @@ void RemoveBlockFromPageMap(CodeBlock* block)
   }
 }
 
-void LinkBlock(CodeBlock* from, CodeBlock* to)
+void LinkBlock(CodeBlock* from, CodeBlock* to, void* host_pc, void* host_resolve_pc, u32 host_pc_size)
 {
   Log_DebugPrintf("Linking block %p(%08x) to %p(%08x)", from, from->GetPC(), to, to->GetPC());
-  from->link_successors.push_back(to);
-  to->link_predecessors.push_back(from);
+
+  CodeBlock::LinkInfo li;
+  li.block = to;
+  li.host_pc = host_pc;
+  li.host_resolve_pc = host_resolve_pc;
+  li.host_pc_size = host_pc_size;
+  from->link_successors.push_back(li);
+
+  li.block = from;
+  to->link_predecessors.push_back(li);
+
+  // apply in code
+  if (host_pc)
+  {
+    Log_DebugPrintf("Backpatching %p(%08x) to jump to block %p (%08x)", host_pc, from->GetPC(), to, to->GetPC());
+    Recompiler::CodeGenerator::BackpatchBranch(host_pc, host_pc_size, to->host_code);
+  }
 }
 
 void UnlinkBlock(CodeBlock* block)
 {
-  for (CodeBlock* predecessor : block->link_predecessors)
+  for (CodeBlock::LinkInfo& li : block->link_predecessors)
   {
-    auto iter = std::find(predecessor->link_successors.begin(), predecessor->link_successors.end(), block);
-    Assert(iter != predecessor->link_successors.end());
-    predecessor->link_successors.erase(iter);
+    auto iter = std::find_if(li.block->link_successors.begin(), li.block->link_successors.end(),
+                             [block](const CodeBlock::LinkInfo& li) { return li.block == block; });
+    Assert(iter != li.block->link_successors.end());
+
+    // Restore blocks linked to this block back to the resolver
+    if (li.host_pc)
+    {
+      Log_DebugPrintf("Backpatching %p(%08x) to jump to resolver", li.host_pc, li.block->GetPC());
+      Recompiler::CodeGenerator::BackpatchBranch(li.host_pc, li.host_pc_size, li.host_resolve_pc);
+    }
+
+    li.block->link_successors.erase(iter);
   }
   block->link_predecessors.clear();
 
-  for (CodeBlock* successor : block->link_successors)
+  for (CodeBlock::LinkInfo& li : block->link_successors)
   {
-    auto iter = std::find(successor->link_predecessors.begin(), successor->link_predecessors.end(), block);
-    Assert(iter != successor->link_predecessors.end());
-    successor->link_predecessors.erase(iter);
+    auto iter = std::find_if(li.block->link_predecessors.begin(), li.block->link_predecessors.end(),
+                             [block](const CodeBlock::LinkInfo& li) { return li.block == block; });
+    Assert(iter != li.block->link_predecessors.end());
+
+    // Don't have to do anything special for successors - just let the successor know it's no longer linked.
+    li.block->link_predecessors.erase(iter);
   }
   block->link_successors.clear();
 }
@@ -934,5 +941,26 @@ Common::PageFaultHandler::HandlerResult LUTPageFaultHandler(void* exception_pc, 
 
 void CPU::Recompiler::Thunks::templog()
 {
-  // CPU::CodeCache::LogCurrentState();
+  //CPU::CodeCache::LogCurrentState();
+
+#if 1
+  const u32 tick = TimingEvents::GetGlobalTickCounter() + CPU::GetPendingTicks();
+  if (tick == 1695548810)
+    __debugbreak();
+#endif
+}
+
+void CPU::Recompiler::Thunks::ResolveBranch(CodeBlock* block, void* host_pc, void* host_resolve_pc, u32 host_pc_size)
+{
+  CodeBlockKey key = CodeCache::GetNextBlockKey();
+  CodeBlock* successor_block = CodeCache::LookupBlock(key);
+  if (!successor_block)
+  {
+    // just turn it into a return to the dispatcher instead.
+    CodeGenerator::BackpatchReturn(host_pc, host_pc_size);
+    return;
+  }
+
+  // link blocks!
+  CodeCache::LinkBlock(block, successor_block, host_pc, host_resolve_pc, host_pc_size);
 }

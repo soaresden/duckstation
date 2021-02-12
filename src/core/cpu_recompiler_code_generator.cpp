@@ -913,8 +913,6 @@ void CodeGenerator::BlockPrologue()
 {
   InitSpeculativeRegs();
 
-  // EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::templog);
-
   EmitStoreCPUStructField(offsetof(State, exception_raised), Value::FromConstantU8(0));
 
   if (m_block->uncached_fetch_ticks > 0)
@@ -2008,15 +2006,11 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
     if (condition != Condition::Always || lr_reg != Reg::count)
       next_pc = CalculatePC(4);
 
-    LabelType* in_block_target = nullptr;
-    if (cbi.is_direct_branch_in_block)
-      in_block_target = GetBranchTargetLabel(GetDirectBranchTarget(cbi.instruction, cbi.pc));
-
     Value take_branch;
     LabelType branch_taken, branch_not_taken;
     if (condition != Condition::Always)
     {
-      if (!in_block_target)
+      if (!cbi.is_direct_branch_instruction)
       {
         // condition is inverted because we want the case for skipping it
         if (lhs.IsValid() && rhs.IsValid())
@@ -2111,9 +2105,10 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
       m_register_cache.PopState();
     }
 
-    if (in_block_target)
+    if (cbi.is_direct_branch_instruction)
     {
       // if it's an in-block branch, compile the delay slot now
+      // TODO: Make this more optimal by moving the condition down if it's a nop
       Assert((m_current_instruction + 1) != m_block_end);
       InstructionEpilogue(cbi);
       m_current_instruction++;
@@ -2121,62 +2116,113 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
         return false;
 
       // flush all regs since we're at the end of the block now
-      m_register_cache.FlushAllGuestRegisters(false, true);
-      if (m_register_cache.HasLoadDelay())
-        m_register_cache.WriteLoadDelayToCPU(true);
-      AddPendingCycles(true);
+      BlockEpilogue();
 
-      // branch not taken?
-      EmitConditionalBranch(Condition::NotZero, true, take_branch.GetHostRegister(), take_branch.size,
-                            &branch_not_taken);
+      // check downcount
+      Value pending_ticks = m_register_cache.AllocateScratch(RegSize_32);
+      Value downcount = m_register_cache.AllocateScratch(RegSize_32);
+      EmitLoadCPUStructField(pending_ticks.GetHostRegister(), RegSize_32, offsetof(State, pending_ticks));
+      EmitLoadCPUStructField(downcount.GetHostRegister(), RegSize_32, offsetof(State, downcount));
 
-      m_register_cache.PushState();
+      // pending < downcount
+      LabelType return_to_dispatcher;
+
+      if (condition != Condition::Always)
       {
-        // check downcount
+        EmitBranchIfBitClear(take_branch.GetHostRegister(), take_branch.size, 0, &branch_not_taken);
+        m_register_cache.PushState();
         {
-          Value pending_ticks = m_register_cache.AllocateScratch(RegSize_32);
-          Value downcount = m_register_cache.AllocateScratch(RegSize_32);
-          EmitLoadCPUStructField(pending_ticks.GetHostRegister(), RegSize_32, offsetof(State, pending_ticks));
-          EmitLoadCPUStructField(downcount.GetHostRegister(), RegSize_32, offsetof(State, downcount));
-
-          // pending < downcount
+          WriteNewPC(branch_target, false);
           EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
-                                &branch_taken);
+            &return_to_dispatcher);
+
+          // we're committed at this point :D
+          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+          m_register_cache.PopCalleeSavedRegisters(false);
+
+          const void* jump_pointer = GetCurrentCodePointer();
+          const void* resolve_pointer = GetCurrentFarCodePointer();
+          EmitBranch(resolve_pointer);
+          const u32 jump_size =
+            static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
+          SwitchToFarCode();
+
+          EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
+            Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
+            Value::FromConstantU32(jump_size));
+
+          // maybe linked, return to dispatcher this time
+          m_emit->ret();
         }
+        m_register_cache.PopState();
 
-        // EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::templog);
-
-        // now, we can jump back in the block
-        // if it's an in-branch block, we can skip writing the PC since it's synced anyway
-        EmitBranch(in_block_target);
+        SwitchToNearCode();
+        EmitBindLabel(&branch_not_taken);
       }
 
-      // restore back
-      m_register_cache.PopState();
-    }
+      if (condition != Condition::Always)
+      {
+        WriteNewPC(next_pc, true);
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+      }
+      else
+      {
+        WriteNewPC(branch_target, true);
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+      }
 
-    if (condition != Condition::Always)
-    {
-      // branch taken path - modify the next pc
-      EmitBindLabel(&branch_taken);
-      EmitCopyValue(next_pc.GetHostRegister(), branch_target);
+      EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
+                            &return_to_dispatcher);
 
-      // converge point
-      EmitBindLabel(&branch_not_taken);
-      WriteNewPC(next_pc, true);
+      if (condition != Condition::Always)
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+      else
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+
+      next_pc.ReleaseAndClear();
+      branch_target.ReleaseAndClear();
+      take_branch.ReleaseAndClear();
+      m_register_cache.PopCalleeSavedRegisters(false);
+
+      const void* jump_pointer = GetCurrentCodePointer();
+      const void* resolve_pointer = GetCurrentFarCodePointer();
+      EmitBranch(GetCurrentFarCodePointer());
+      const u32 jump_size =
+        static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
+      SwitchToFarCode();
+
+      EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
+                       Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
+                       Value::FromConstantU32(jump_size));
+      m_emit->ret();
+
+      SwitchToNearCode();
+      EmitBindLabel(&return_to_dispatcher);
     }
     else
     {
-      // next_pc is not used for unconditional branches
-      WriteNewPC(branch_target, true);
+      if (condition != Condition::Always)
+      {
+        // branch taken path - modify the next pc
+        EmitBindLabel(&branch_taken);
+        EmitCopyValue(next_pc.GetHostRegister(), branch_target);
+
+        // converge point
+        EmitBindLabel(&branch_not_taken);
+        WriteNewPC(next_pc, true);
+      }
+      else
+      {
+        // next_pc is not used for unconditional branches
+        WriteNewPC(branch_target, true);
+      }
+
+      InstructionEpilogue(cbi);
     }
 
     // now invalidate lr becuase it was possibly written in the branch
     if (lr_reg != Reg::count && lr_reg != Reg::zero)
       m_register_cache.InvalidateGuestRegister(lr_reg);
-
-    if (!in_block_target)
-      InstructionEpilogue(cbi);
 
     return true;
   };

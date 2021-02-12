@@ -69,6 +69,14 @@ struct CodeBlock
 {
   using HostCodePointer = void (*)();
 
+  struct LinkInfo
+  {
+    CodeBlock* block;
+    void* host_pc;
+    void* host_resolve_pc;
+    u32 host_pc_size;
+  };
+
   CodeBlock(const CodeBlockKey key_) : key(key_) {}
 
   CodeBlockKey key;
@@ -76,8 +84,8 @@ struct CodeBlock
   HostCodePointer host_code = nullptr;
 
   std::vector<CodeBlockInstruction> instructions;
-  std::vector<CodeBlock*> link_predecessors;
-  std::vector<CodeBlock*> link_successors;
+  std::vector<LinkInfo> link_predecessors;
+  std::vector<LinkInfo> link_successors;
 
   TickCount uncached_fetch_ticks = 0;
   u32 icache_line_count = 0;

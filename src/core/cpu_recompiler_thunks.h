@@ -3,6 +3,7 @@
 #include "cpu_types.h"
 
 namespace CPU {
+struct CodeBlock;
 struct CodeBlockInstruction;
 
 namespace Recompiler::Thunks {
@@ -33,6 +34,7 @@ void UncheckedWriteMemoryHalfWord(u32 address, u16 value);
 void UncheckedWriteMemoryWord(u32 address, u32 value);
 
 void UpdateFastmemMapping();
+void ResolveBranch(CodeBlock* block, void* host_pc, void* host_resolve_pc, u32 host_pc_size);
 void templog();
 
 } // namespace Recompiler::Thunks

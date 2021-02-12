@@ -27,10 +27,12 @@ public:
   static void AlignCodeBuffer(JitCodeBuffer* code_buffer);
 
   static bool BackpatchLoadStore(const LoadStoreBackpatchInfo& lbi);
+  static void BackpatchBranch(void* pc, u32 pc_size, void* target);
+  static void BackpatchReturn(void* pc, u32 pc_size);
 
   bool CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* out_host_code, u32* out_host_code_size);
 
-  CodeCache::DispatcherFunction CompileDispatcher();
+  CodeCache::DispatcherFunction CompileDispatcher(void** dispatch_next_block_ptr);
   CodeCache::SingleBlockDispatcherFunction CompileSingleBlockDispatcher();
 
   //////////////////////////////////////////////////////////////////////////
@@ -104,6 +106,7 @@ public:
   void EmitConditionalBranch(Condition condition, bool invert, HostReg lhs, const Value& rhs, LabelType* label);
   void EmitConditionalBranch(Condition condition, bool invert, LabelType* label);
   void EmitBranchIfBitClear(HostReg reg, RegSize size, u8 bit, LabelType* label);
+  void EmitBranchIfBitSet(HostReg reg, RegSize size, u8 bit, LabelType* label);
   void EmitBindLabel(LabelType* label);
 
   u32 PrepareStackForCall();

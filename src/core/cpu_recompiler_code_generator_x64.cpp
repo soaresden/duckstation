@@ -2322,6 +2322,41 @@ bool CodeGenerator::BackpatchLoadStore(const LoadStoreBackpatchInfo& lbi)
   return true;
 }
 
+void CodeGenerator::BackpatchReturn(void* pc, u32 pc_size)
+{
+  Log_DevPrintf("Backpatching %p to return", pc);
+
+  // turn it into a jump to the slowmem handler
+  Xbyak::CodeGenerator cg(pc_size, pc);
+  cg.ret();
+
+    const s32 nops = static_cast<s32>(pc_size) -
+                   static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
+  Assert(nops >= 0);
+  for (s32 i = 0; i < nops; i++)
+    cg.nop();
+
+  JitCodeBuffer::FlushInstructionCache(pc, pc_size);
+}
+
+void CodeGenerator::BackpatchBranch(void* pc, u32 pc_size, void* target)
+{
+  Log_DevPrintf("Backpatching %p to %p [branch]", pc, target);
+
+  // turn it into a jump to the slowmem handler
+  Xbyak::CodeGenerator cg(pc_size, pc);
+  cg.jmp(target);
+
+  // shouldn't have any nops
+  const s32 nops = static_cast<s32>(pc_size) -
+                   static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
+  Assert(nops >= 0);
+  for (s32 i = 0; i < nops; i++)
+    cg.nop();
+
+  JitCodeBuffer::FlushInstructionCache(pc, pc_size);
+}
+
 void CodeGenerator::EmitLoadGlobal(HostReg host_reg, RegSize size, const void* ptr)
 {
   const s64 displacement =
@@ -2821,6 +2856,59 @@ void CodeGenerator::EmitConditionalBranch(Condition condition, bool invert, Labe
   }
 }
 
+void CodeGenerator::EmitBranchIfBitSet(HostReg reg, RegSize size, u8 bit, LabelType* label)
+{
+  if (bit < 8)
+  {
+    // same size, probably faster
+    switch (size)
+    {
+      case RegSize_8:
+        m_emit->test(GetHostReg8(reg), (1u << bit));
+        m_emit->jnz(*label);
+        break;
+
+      case RegSize_16:
+        m_emit->test(GetHostReg16(reg), (1u << bit));
+        m_emit->jnz(*label);
+        break;
+
+      case RegSize_32:
+        m_emit->test(GetHostReg32(reg), (1u << bit));
+        m_emit->jnz(*label);
+        break;
+
+      default:
+        UnreachableCode();
+        break;
+    }
+  }
+  else
+  {
+    switch (size)
+    {
+      case RegSize_8:
+        m_emit->bt(GetHostReg8(reg), bit);
+        m_emit->jc(*label);
+        break;
+
+      case RegSize_16:
+        m_emit->bt(GetHostReg16(reg), bit);
+        m_emit->jc(*label);
+        break;
+
+      case RegSize_32:
+        m_emit->bt(GetHostReg32(reg), bit);
+        m_emit->jc(*label);
+        break;
+
+      default:
+        UnreachableCode();
+        break;
+    }
+  }
+}
+
 void CodeGenerator::EmitBranchIfBitClear(HostReg reg, RegSize size, u8 bit, LabelType* label)
 {
   if (bit < 8)
@@ -2889,7 +2977,7 @@ void CodeGenerator::EmitLoadGlobalAddress(HostReg host_reg, const void* ptr)
     m_emit->mov(GetHostReg64(host_reg), reinterpret_cast<size_t>(ptr));
 }
 
-CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher()
+CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher(void** dispatch_next_block_ptr)
 {
   m_register_cache.ReserveCalleeSavedRegisters();
   const u32 stack_adjust = PrepareStackForCall();
@@ -2937,6 +3025,7 @@ CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher()
   Xbyak::Label main_loop;
   m_emit->align(16);
   m_emit->L(main_loop);
+  *dispatch_next_block_ptr = GetCurrentCodePointer();
 
   // eax <- pending_ticks
   m_emit->mov(m_emit->eax, m_emit->dword[m_emit->rbp + offsetof(State, pending_ticks)]);
