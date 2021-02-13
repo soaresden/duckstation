@@ -938,17 +938,6 @@ Common::PageFaultHandler::HandlerResult LUTPageFaultHandler(void* exception_pc, 
 
 } // namespace CPU::CodeCache
 
-void CPU::Recompiler::Thunks::templog()
-{
-  //CPU::CodeCache::LogCurrentState();
-
-#if 1
-  const u32 tick = TimingEvents::GetGlobalTickCounter() + CPU::GetPendingTicks();
-  if (tick == 1695548810)
-    __debugbreak();
-#endif
-}
-
 void CPU::Recompiler::Thunks::ResolveBranch(CodeBlock* block, void* host_pc, void* host_resolve_pc, u32 host_pc_size)
 {
   CodeBlockKey key = CodeCache::GetNextBlockKey();
