@@ -27,7 +27,7 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
   m_block_start = block->instructions.data();
   m_block_end = block->instructions.data() + block->instructions.size();
 
-  EmitBeginBlock();
+  EmitBeginBlock(true);
   BlockPrologue();
 
   m_current_instruction = m_block_start;
@@ -46,7 +46,7 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
   }
 
   BlockEpilogue();
-  EmitEndBlock();
+  EmitEndBlock(true, true);
 
   FinalizeBlock(out_host_code, out_host_code_size);
   Log_ProfilePrintf("JIT block 0x%08X: %zu instructions (%u bytes), %u host bytes", block->GetPC(),
@@ -2106,25 +2106,24 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
         {
           WriteNewPC(branch_target, false);
           EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
-            &return_to_dispatcher);
+                                &return_to_dispatcher);
 
           // we're committed at this point :D
           EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
-          m_register_cache.PopCalleeSavedRegisters(false);
+          EmitEndBlock(true, false);
 
           const void* jump_pointer = GetCurrentCodePointer();
           const void* resolve_pointer = GetCurrentFarCodePointer();
           EmitBranch(resolve_pointer);
-          const u32 jump_size =
-            static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
+          const u32 jump_size = static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) -
+                                                 static_cast<const char*>(jump_pointer));
           SwitchToFarCode();
 
+          EmitBeginBlock(true);
           EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
-            Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
-            Value::FromConstantU32(jump_size));
-
-          // maybe linked, return to dispatcher this time
-          m_emit->ret();
+                           Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
+                           Value::FromConstantU32(jump_size));
+          EmitEndBlock(true, true);
         }
         m_register_cache.PopState();
 
@@ -2132,41 +2131,43 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
         EmitBindLabel(&branch_not_taken);
       }
 
-      if (condition != Condition::Always)
+      m_register_cache.PushState();
       {
-        WriteNewPC(next_pc, true);
-        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+        if (condition != Condition::Always)
+        {
+          WriteNewPC(next_pc, true);
+          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+        }
+        else
+        {
+          WriteNewPC(branch_target, true);
+          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+        }
+
+        EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
+                              &return_to_dispatcher);
+
+        if (condition != Condition::Always)
+          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+        else
+          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+
+        EmitEndBlock(true, false);
+
+        const void* jump_pointer = GetCurrentCodePointer();
+        const void* resolve_pointer = GetCurrentFarCodePointer();
+        EmitBranch(GetCurrentFarCodePointer());
+        const u32 jump_size =
+          static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
+        SwitchToFarCode();
+
+        EmitBeginBlock(true);
+        EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
+                         Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
+                         Value::FromConstantU32(jump_size));
+        EmitEndBlock(true, true);
       }
-      else
-      {
-        WriteNewPC(branch_target, true);
-        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
-      }
-
-      EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
-                            &return_to_dispatcher);
-
-      if (condition != Condition::Always)
-        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
-      else
-        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
-
-      next_pc.ReleaseAndClear();
-      branch_target.ReleaseAndClear();
-      take_branch.ReleaseAndClear();
-      m_register_cache.PopCalleeSavedRegisters(false);
-
-      const void* jump_pointer = GetCurrentCodePointer();
-      const void* resolve_pointer = GetCurrentFarCodePointer();
-      EmitBranch(GetCurrentFarCodePointer());
-      const u32 jump_size =
-        static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
-      SwitchToFarCode();
-
-      EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
-                       Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
-                       Value::FromConstantU32(jump_size));
-      m_emit->ret();
+      m_register_cache.PopState();
 
       SwitchToNearCode();
       EmitBindLabel(&return_to_dispatcher);

@@ -38,8 +38,8 @@ public:
   //////////////////////////////////////////////////////////////////////////
   // Code Generation
   //////////////////////////////////////////////////////////////////////////
-  void EmitBeginBlock();
-  void EmitEndBlock();
+  void EmitBeginBlock(bool allocate_registers = true);
+  void EmitEndBlock(bool free_registers = true, bool emit_return = true);
   void EmitExceptionExit();
   void EmitExceptionExitOnBool(const Value& value);
   void FinalizeBlock(CodeBlock::HostCodePointer* out_host_code, u32* out_host_code_size);
@@ -258,6 +258,7 @@ private:
 
   bool m_fastmem_load_base_in_register = false;
   bool m_fastmem_store_base_in_register = false;
+  bool m_block_ended = false;
 
   //////////////////////////////////////////////////////////////////////////
   // Speculative Constants

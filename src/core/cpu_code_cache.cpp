@@ -737,7 +737,7 @@ void LinkBlock(CodeBlock* from, CodeBlock* to, void* host_pc, void* host_resolve
   if (host_pc)
   {
     Log_DebugPrintf("Backpatching %p(%08x) to jump to block %p (%08x)", host_pc, from->GetPC(), to, to->GetPC());
-    Recompiler::CodeGenerator::BackpatchBranch(host_pc, host_pc_size, to->host_code);
+    Recompiler::CodeGenerator::BackpatchBranch(host_pc, host_pc_size, reinterpret_cast<void*>(to->host_code));
   }
 }
 

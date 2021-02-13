@@ -195,41 +195,50 @@ Value CodeGenerator::GetValueInHostOrScratchRegister(const Value& value, bool al
   return new_value;
 }
 
-void CodeGenerator::EmitBeginBlock()
+void CodeGenerator::EmitBeginBlock(bool allocate_registers /* = true */)
 {
   m_emit->Sub(a64::sp, a64::sp, FUNCTION_STACK_SIZE);
 
-  // Save the link register, since we'll be calling functions.
-  const bool link_reg_allocated = m_register_cache.AllocateHostReg(30);
-  DebugAssert(link_reg_allocated);
-  UNREFERENCED_VARIABLE(link_reg_allocated);
-  m_register_cache.AssumeCalleeSavedRegistersAreSaved();
-
-  // Store the CPU struct pointer. TODO: make this better.
-  const bool cpu_reg_allocated = m_register_cache.AllocateHostReg(RCPUPTR);
-  DebugAssert(cpu_reg_allocated);
-  UNREFERENCED_VARIABLE(cpu_reg_allocated);
-
-  // If there's loadstore instructions, preload the fastmem base.
-  if (m_block->contains_loadstore_instructions)
+  if (allocate_registers)
   {
-    const bool fastmem_reg_allocated = m_register_cache.AllocateHostReg(RMEMBASEPTR);
-    Assert(fastmem_reg_allocated);
-    m_emit->Ldr(GetFastmemBasePtrReg(), a64::MemOperand(GetCPUPtrReg(), offsetof(State, fastmem_base)));
+    // Save the link register, since we'll be calling functions.
+    const bool link_reg_allocated = m_register_cache.AllocateHostReg(30);
+    DebugAssert(link_reg_allocated);
+    UNREFERENCED_VARIABLE(link_reg_allocated);
+
+    m_register_cache.AssumeCalleeSavedRegistersAreSaved();
+
+    // Store the CPU struct pointer. TODO: make this better.
+    const bool cpu_reg_allocated = m_register_cache.AllocateHostReg(RCPUPTR);
+    DebugAssert(cpu_reg_allocated);
+    UNREFERENCED_VARIABLE(cpu_reg_allocated);
+
+    // If there's loadstore instructions, preload the fastmem base.
+    if (m_block->contains_loadstore_instructions)
+    {
+      const bool fastmem_reg_allocated = m_register_cache.AllocateHostReg(RMEMBASEPTR);
+      Assert(fastmem_reg_allocated);
+      m_emit->Ldr(GetFastmemBasePtrReg(), a64::MemOperand(GetCPUPtrReg(), offsetof(State, fastmem_base)));
+    }
   }
 }
 
-void CodeGenerator::EmitEndBlock()
+void CodeGenerator::EmitEndBlock(bool free_registers /* = true */, bool emit_return /* = true */)
 {
-  if (m_block->contains_loadstore_instructions)
-    m_register_cache.FreeHostReg(RMEMBASEPTR);
+  if (free_registers)
+  {
+    if (m_block->contains_loadstore_instructions)
+      m_register_cache.FreeHostReg(RMEMBASEPTR);
 
-  m_register_cache.FreeHostReg(RCPUPTR);
-  m_register_cache.PopCalleeSavedRegisters(true);
+    m_register_cache.FreeHostReg(RCPUPTR);
+
+    m_register_cache.PopCalleeSavedRegisters(true);
+  }
 
   m_emit->Add(a64::sp, a64::sp, FUNCTION_STACK_SIZE);
-  // m_emit->b(GetPCDisplacement(GetCurrentCodePointer(), s_dispatcher_return_address));
-  m_emit->Ret();
+
+  if (emit_return)
+    m_emit->Ret();
 }
 
 void CodeGenerator::EmitExceptionExit()

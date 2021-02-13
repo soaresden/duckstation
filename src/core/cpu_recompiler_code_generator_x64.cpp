@@ -206,33 +206,40 @@ Value CodeGenerator::GetValueInHostOrScratchRegister(const Value& value, bool al
   return new_value;
 }
 
-void CodeGenerator::EmitBeginBlock()
+void CodeGenerator::EmitBeginBlock(bool allocate_registers /* = true */)
 {
-  m_register_cache.AssumeCalleeSavedRegistersAreSaved();
-
-  // Store the CPU struct pointer.
-  const bool cpu_reg_allocated = m_register_cache.AllocateHostReg(RCPUPTR);
-  DebugAssert(cpu_reg_allocated);
-  // m_emit->mov(GetCPUPtrReg(), reinterpret_cast<size_t>(&g_state));
-
-  // If there's loadstore instructions, preload the fastmem base.
-  if (m_block->contains_loadstore_instructions)
+  if (allocate_registers)
   {
-    const bool fastmem_reg_allocated = m_register_cache.AllocateHostReg(RMEMBASEPTR);
-    Assert(fastmem_reg_allocated);
-    m_emit->mov(GetFastmemBasePtrReg(), m_emit->qword[GetCPUPtrReg() + offsetof(CPU::State, fastmem_base)]);
+    m_register_cache.AssumeCalleeSavedRegistersAreSaved();
+
+    // Store the CPU struct pointer.
+    const bool cpu_reg_allocated = m_register_cache.AllocateHostReg(RCPUPTR);
+    DebugAssert(cpu_reg_allocated);
+    // m_emit->mov(GetCPUPtrReg(), reinterpret_cast<size_t>(&g_state));
+
+    // If there's loadstore instructions, preload the fastmem base.
+    if (m_block->contains_loadstore_instructions)
+    {
+      const bool fastmem_reg_allocated = m_register_cache.AllocateHostReg(RMEMBASEPTR);
+      Assert(fastmem_reg_allocated);
+      m_emit->mov(GetFastmemBasePtrReg(), m_emit->qword[GetCPUPtrReg() + offsetof(CPU::State, fastmem_base)]);
+    }
   }
 }
 
-void CodeGenerator::EmitEndBlock()
+void CodeGenerator::EmitEndBlock(bool free_registers /* = true */, bool emit_return /* = true */)
 {
-  m_register_cache.FreeHostReg(RCPUPTR);
-  if (m_block->contains_loadstore_instructions)
-    m_register_cache.FreeHostReg(RMEMBASEPTR);
+  if (free_registers)
+  {
+    m_register_cache.FreeHostReg(RCPUPTR);
+    if (m_block->contains_loadstore_instructions)
+      m_register_cache.FreeHostReg(RMEMBASEPTR);
 
-  m_register_cache.PopCalleeSavedRegisters(true);
+    m_register_cache.PopCalleeSavedRegisters(true);
+  }
 
-  m_emit->ret();
+  if (emit_return)
+    m_emit->ret();
 }
 
 void CodeGenerator::EmitExceptionExit()
@@ -2329,8 +2336,8 @@ void CodeGenerator::BackpatchReturn(void* pc, u32 pc_size)
   Xbyak::CodeGenerator cg(pc_size, pc);
   cg.ret();
 
-    const s32 nops = static_cast<s32>(pc_size) -
-                   static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
+  const s32 nops =
+    static_cast<s32>(pc_size) - static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
   Assert(nops >= 0);
   for (s32 i = 0; i < nops; i++)
     cg.nop();
@@ -2346,8 +2353,8 @@ void CodeGenerator::BackpatchBranch(void* pc, u32 pc_size, void* target)
   cg.jmp(target);
 
   // shouldn't have any nops
-  const s32 nops = static_cast<s32>(pc_size) -
-                   static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
+  const s32 nops =
+    static_cast<s32>(pc_size) - static_cast<s32>(static_cast<ptrdiff_t>(cg.getCurr() - static_cast<u8*>(pc)));
   Assert(nops >= 0);
   for (s32 i = 0; i < nops; i++)
     cg.nop();
