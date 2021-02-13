@@ -863,17 +863,6 @@ Value CodeGenerator::NotValue(const Value& val)
   return res;
 }
 
-LabelType* CodeGenerator::GetBranchTargetLabel(VirtualMemoryAddress pc)
-{
-  for (auto& it : m_branch_targets)
-  {
-    if (it.first == pc)
-      return &it.second;
-  }
-
-  return nullptr;
-}
-
 void CodeGenerator::GenerateExceptionExit(const CodeBlockInstruction& cbi, Exception excode,
                                           Condition condition /* = Condition::Always */)
 {
@@ -949,23 +938,6 @@ void CodeGenerator::InstructionPrologue(const CodeBlockInstruction& cbi, TickCou
 #if defined(_DEBUG) && defined(CPU_X64)
   m_emit->nop();
 #endif
-
-  // flush and reload registers on branch targets since we'll be coming back here
-  if (cbi.is_direct_branch_target)
-  {
-    if (&cbi != m_block_start)
-    {
-      m_register_cache.FlushAllGuestRegisters(true, true);
-      if (m_register_cache.HasLoadDelay())
-        m_register_cache.WriteLoadDelayToCPU(true);
-      AddPendingCycles(true);
-      SyncPC();
-    }
-    LabelType label;
-    EmitBindLabel(&label);
-    m_branch_targets.emplace_back(cbi.pc, std::move(label));
-    m_load_delay_dirty = true;
-  }
 
   // move instruction offsets forward
   m_current_instruction_pc_offset = m_pc_offset;

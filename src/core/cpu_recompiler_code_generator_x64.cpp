@@ -2306,7 +2306,7 @@ void CodeGenerator::EmitStoreGuestMemorySlowmem(const CodeBlockInstruction& cbi,
 
 bool CodeGenerator::BackpatchLoadStore(const LoadStoreBackpatchInfo& lbi)
 {
-  Log_DevPrintf("Backpatching %p (guest PC 0x%08X) to slowmem", lbi.host_pc, lbi.guest_pc);
+  Log_ProfilePrintf("Backpatching %p (guest PC 0x%08X) to slowmem", lbi.host_pc, lbi.guest_pc);
 
   // turn it into a jump to the slowmem handler
   Xbyak::CodeGenerator cg(lbi.host_code_size, lbi.host_pc);
@@ -2324,9 +2324,8 @@ bool CodeGenerator::BackpatchLoadStore(const LoadStoreBackpatchInfo& lbi)
 
 void CodeGenerator::BackpatchReturn(void* pc, u32 pc_size)
 {
-  Log_DevPrintf("Backpatching %p to return", pc);
+  Log_ProfilePrintf("Backpatching %p to return", pc);
 
-  // turn it into a jump to the slowmem handler
   Xbyak::CodeGenerator cg(pc_size, pc);
   cg.ret();
 
@@ -2341,9 +2340,8 @@ void CodeGenerator::BackpatchReturn(void* pc, u32 pc_size)
 
 void CodeGenerator::BackpatchBranch(void* pc, u32 pc_size, void* target)
 {
-  Log_DevPrintf("Backpatching %p to %p [branch]", pc, target);
+  Log_ProfilePrintf("Backpatching %p to %p [branch]", pc, target);
 
-  // turn it into a jump to the slowmem handler
   Xbyak::CodeGenerator cg(pc_size, pc);
   cg.jmp(target);
 
@@ -2977,7 +2975,7 @@ void CodeGenerator::EmitLoadGlobalAddress(HostReg host_reg, const void* ptr)
     m_emit->mov(GetHostReg64(host_reg), reinterpret_cast<size_t>(ptr));
 }
 
-CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher(void** dispatch_next_block_ptr)
+CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher()
 {
   m_register_cache.ReserveCalleeSavedRegisters();
   const u32 stack_adjust = PrepareStackForCall();
@@ -3025,7 +3023,6 @@ CodeCache::DispatcherFunction CodeGenerator::CompileDispatcher(void** dispatch_n
   Xbyak::Label main_loop;
   m_emit->align(16);
   m_emit->L(main_loop);
-  *dispatch_next_block_ptr = GetCurrentCodePointer();
 
   // eax <- pending_ticks
   m_emit->mov(m_emit->eax, m_emit->dword[m_emit->rbp + offsetof(State, pending_ticks)]);

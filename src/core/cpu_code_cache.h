@@ -55,8 +55,6 @@ struct CodeBlockInstruction
   bool is_unconditional_branch_instruction : 1;
   bool is_branch_delay_slot : 1;
   bool is_direct_branch_instruction : 1;
-  bool is_direct_branch_target : 1;
-  bool is_direct_branch_in_block : 1;
   bool is_load_instruction : 1;
   bool is_store_instruction : 1;
   bool is_load_delay_slot : 1;

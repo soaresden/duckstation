@@ -1752,6 +1752,42 @@ bool CodeGenerator::BackpatchLoadStore(const LoadStoreBackpatchInfo& lbi)
   return true;
 }
 
+void CodeGenerator::BackpatchReturn(void* pc, u32 pc_size)
+{
+  Log_ProfilePrintf("Backpatching %p to return", pc);
+
+  vixl::aarch64::MacroAssembler emit(static_cast<vixl::byte*>(pc), pc_size, a64::PositionDependentCode);
+  emit.ret();
+
+  const s32 nops = (static_cast<s32>(pc_size) - static_cast<s32>(emit.GetCursorOffset())) / 4;
+  Assert(nops >= 0);
+  for (s32 i = 0; i < nops; i++)
+    emit.nop();
+
+  JitCodeBuffer::FlushInstructionCache(pc, pc_size);
+}
+
+void CodeGenerator::BackpatchBranch(void* pc, u32 pc_size, void* target)
+{
+  Log_ProfilePrintf("Backpatching %p to %p [branch]", pc, target);
+
+  // check jump distance
+  const s64 jump_distance = static_cast<s64>(reinterpret_cast<intptr_t>(target) - reinterpret_cast<intptr_t>(pc));
+  Assert(Common::IsAligned(jump_distance, 4));
+  Assert(a64::Instruction::IsValidImmPCOffset(a64::UncondBranchType, jump_distance >> 2));
+
+  vixl::aarch64::MacroAssembler emit(static_cast<vixl::byte*>(pc), pc_size, a64::PositionDependentCode);
+  emit.b(jump_distance >> 2);
+
+  // shouldn't have any nops
+  const s32 nops = (static_cast<s32>(pc_size) - static_cast<s32>(emit.GetCursorOffset())) / 4;
+  Assert(nops >= 0);
+  for (s32 i = 0; i < nops; i++)
+    emit.nop();
+
+  JitCodeBuffer::FlushInstructionCache(pc, pc_size);
+}
+
 void CodeGenerator::EmitLoadGlobal(HostReg host_reg, RegSize size, const void* ptr)
 {
   EmitLoadGlobalAddress(RSCRATCH, ptr);

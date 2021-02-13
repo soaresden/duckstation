@@ -32,7 +32,7 @@ public:
 
   bool CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* out_host_code, u32* out_host_code_size);
 
-  CodeCache::DispatcherFunction CompileDispatcher(void** dispatch_next_block_ptr);
+  CodeCache::DispatcherFunction CompileDispatcher();
   CodeCache::SingleBlockDispatcherFunction CompileSingleBlockDispatcher();
 
   //////////////////////////////////////////////////////////////////////////
@@ -192,8 +192,6 @@ private:
   void* GetCurrentNearCodePointer() const;
   void* GetCurrentFarCodePointer() const;
 
-  LabelType* GetBranchTargetLabel(VirtualMemoryAddress pc);
-
   //////////////////////////////////////////////////////////////////////////
   // Code Generation Helpers
   //////////////////////////////////////////////////////////////////////////
@@ -245,8 +243,6 @@ private:
   CodeEmitter m_near_emitter;
   CodeEmitter m_far_emitter;
   CodeEmitter* m_emit;
-
-  std::vector<std::pair<VirtualMemoryAddress, LabelType>> m_branch_targets;
 
   TickCount m_delayed_cycles_add = 0;
   TickCount m_pc_offset = 0;

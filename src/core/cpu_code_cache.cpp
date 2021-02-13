@@ -46,7 +46,6 @@ static JitCodeBuffer s_code_buffer;
 std::array<CodeBlock::HostCodePointer, FAST_MAP_TOTAL_SLOT_COUNT> s_fast_map;
 DispatcherFunction s_asm_dispatcher;
 SingleBlockDispatcherFunction s_single_block_asm_dispatcher;
-void* s_asm_dispatcher_next_block;
 
 ALWAYS_INLINE static u32 GetFastMapIndex(u32 pc)
 {
@@ -290,7 +289,7 @@ void CompileDispatcher()
 {
   {
     Recompiler::CodeGenerator cg(&s_code_buffer);
-    s_asm_dispatcher = cg.CompileDispatcher(&s_asm_dispatcher_next_block);
+    s_asm_dispatcher = cg.CompileDispatcher();
   }
   {
     Recompiler::CodeGenerator cg(&s_code_buffer);
@@ -308,7 +307,7 @@ void ExecuteRecompiler()
   g_using_interpreter = false;
   g_state.frame_done = false;
 
-#if 1
+#if 0
   while (!g_state.frame_done)
   {
     if (HasPendingInterrupt())
@@ -327,7 +326,7 @@ void ExecuteRecompiler()
       if (pc == 0xbfc0d444)
         __debugbreak();
 #endif
-#if 1
+#if 0
       const u32 tick = TimingEvents::GetGlobalTickCounter() + CPU::GetPendingTicks();
       if (tick == 1695548810)
         __debugbreak();
