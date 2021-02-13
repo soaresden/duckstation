@@ -258,7 +258,6 @@ private:
 
   bool m_fastmem_load_base_in_register = false;
   bool m_fastmem_store_base_in_register = false;
-  bool m_block_ended = false;
 
   //////////////////////////////////////////////////////////////////////////
   // Speculative Constants

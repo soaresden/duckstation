@@ -28,7 +28,6 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
   m_block_end = block->instructions.data() + block->instructions.size();
   m_fastmem_load_base_in_register = false;
   m_fastmem_store_base_in_register = false;
-  m_block_ended = false;
 
   EmitBeginBlock(true);
   BlockPrologue();
@@ -48,11 +47,8 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
     m_current_instruction++;
   }
 
-  if (!m_block_ended)
-  {
-    BlockEpilogue();
-    EmitEndBlock(true, true);
-  }
+  BlockEpilogue();
+  EmitEndBlock(true, true);
 
   FinalizeBlock(out_host_code, out_host_code_size);
   Log_ProfilePrintf("JIT block 0x%08X: %zu instructions (%u bytes), %u host bytes", block->GetPC(),
@@ -2175,15 +2171,7 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
                        Value::FromConstantU32(jump_size));
       EmitEndBlock(true, true);
 
-      //if (condition != Condition::Always)
-      {
-        m_register_cache.PopState();
-      }
-      //else
-      {
-        // we don't need the extra cleanup here, since we're always exiting the block
-        //m_block_ended = true;
-      }
+      m_register_cache.PopState();
 
       SwitchToNearCode();
       EmitBindLabel(&return_to_dispatcher);
