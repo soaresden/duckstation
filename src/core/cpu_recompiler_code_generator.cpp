@@ -26,6 +26,9 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
   m_block = block;
   m_block_start = block->instructions.data();
   m_block_end = block->instructions.data() + block->instructions.size();
+  m_fastmem_load_base_in_register = false;
+  m_fastmem_store_base_in_register = false;
+  m_block_ended = false;
 
   EmitBeginBlock(true);
   BlockPrologue();
@@ -45,8 +48,11 @@ bool CodeGenerator::CompileBlock(CodeBlock* block, CodeBlock::HostCodePointer* o
     m_current_instruction++;
   }
 
-  BlockEpilogue();
-  EmitEndBlock(true, true);
+  if (!m_block_ended)
+  {
+    BlockEpilogue();
+    EmitEndBlock(true, true);
+  }
 
   FinalizeBlock(out_host_code, out_host_code_size);
   Log_ProfilePrintf("JIT block 0x%08X: %zu instructions (%u bytes), %u host bytes", block->GetPC(),
@@ -1968,6 +1974,8 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
 
   auto DoBranch = [this, &cbi](Condition condition, const Value& lhs, const Value& rhs, Reg lr_reg,
                                Value&& branch_target) {
+    const bool can_link_block = cbi.is_direct_branch_instruction && g_settings.cpu_recompiler_block_linking;
+
     // ensure the lr register is flushed, since we want it's correct value after the branch
     // we don't want to invalidate it yet because of "jalr r0, r0", branch_target could be the lr_reg.
     if (lr_reg != Reg::count && lr_reg != Reg::zero)
@@ -1982,7 +1990,7 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
     LabelType branch_taken, branch_not_taken;
     if (condition != Condition::Always)
     {
-      if (!cbi.is_direct_branch_instruction)
+      if (!can_link_block)
       {
         // condition is inverted because we want the case for skipping it
         if (lhs.IsValid() && rhs.IsValid())
@@ -2077,7 +2085,7 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
       m_register_cache.PopState();
     }
 
-    if (cbi.is_direct_branch_instruction)
+    if (can_link_block)
     {
       // if it's an in-block branch, compile the delay slot now
       // TODO: Make this more optimal by moving the condition down if it's a nop
@@ -2132,42 +2140,50 @@ bool CodeGenerator::Compile_Branch(const CodeBlockInstruction& cbi)
       }
 
       m_register_cache.PushState();
+
+      if (condition != Condition::Always)
       {
-        if (condition != Condition::Always)
-        {
-          WriteNewPC(next_pc, true);
-          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
-        }
-        else
-        {
-          WriteNewPC(branch_target, true);
-          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
-        }
-
-        EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
-                              &return_to_dispatcher);
-
-        if (condition != Condition::Always)
-          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
-        else
-          EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
-
-        EmitEndBlock(true, false);
-
-        const void* jump_pointer = GetCurrentCodePointer();
-        const void* resolve_pointer = GetCurrentFarCodePointer();
-        EmitBranch(GetCurrentFarCodePointer());
-        const u32 jump_size =
-          static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
-        SwitchToFarCode();
-
-        EmitBeginBlock(true);
-        EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
-                         Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
-                         Value::FromConstantU32(jump_size));
-        EmitEndBlock(true, true);
+        WriteNewPC(next_pc, true);
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
       }
-      m_register_cache.PopState();
+      else
+      {
+        WriteNewPC(branch_target, true);
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+      }
+
+      EmitConditionalBranch(Condition::GreaterEqual, false, pending_ticks.GetHostRegister(), downcount,
+                            &return_to_dispatcher);
+
+      if (condition != Condition::Always)
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), next_pc);
+      else
+        EmitStoreCPUStructField(offsetof(State, current_instruction_pc), branch_target);
+
+      EmitEndBlock(true, false);
+
+      const void* jump_pointer = GetCurrentCodePointer();
+      const void* resolve_pointer = GetCurrentFarCodePointer();
+      EmitBranch(GetCurrentFarCodePointer());
+      const u32 jump_size =
+        static_cast<u32>(static_cast<const char*>(GetCurrentCodePointer()) - static_cast<const char*>(jump_pointer));
+      SwitchToFarCode();
+
+      EmitBeginBlock(true);
+      EmitFunctionCall(nullptr, &CPU::Recompiler::Thunks::ResolveBranch, Value::FromConstantPtr(m_block),
+                       Value::FromConstantPtr(jump_pointer), Value::FromConstantPtr(resolve_pointer),
+                       Value::FromConstantU32(jump_size));
+      EmitEndBlock(true, true);
+
+      //if (condition != Condition::Always)
+      {
+        m_register_cache.PopState();
+      }
+      //else
+      {
+        // we don't need the extra cleanup here, since we're always exiting the block
+        //m_block_ended = true;
+      }
 
       SwitchToNearCode();
       EmitBindLabel(&return_to_dispatcher);

@@ -77,6 +77,7 @@ struct Settings
   bool cpu_overclock_enable = false;
   bool cpu_overclock_active = false;
   bool cpu_recompiler_memory_exceptions = false;
+  bool cpu_recompiler_block_linking = false;
   bool cpu_recompiler_icache = false;
   CPUFastmemMode cpu_fastmem_mode = CPUFastmemMode::Disabled;
 

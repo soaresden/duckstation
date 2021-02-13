@@ -231,6 +231,7 @@ void CodeGenerator::EmitEndBlock(bool free_registers /* = true */, bool emit_ret
       m_register_cache.FreeHostReg(RMEMBASEPTR);
 
     m_register_cache.FreeHostReg(RCPUPTR);
+    m_register_cache.FreeHostReg(30); // lr
 
     m_register_cache.PopCalleeSavedRegisters(true);
   }
