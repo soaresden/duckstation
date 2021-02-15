@@ -3,6 +3,7 @@
 #include "common/audio_stream.h"
 #include "common/byte_stream.h"
 #include "common/crash_handler.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/string_util.h"
@@ -31,6 +32,7 @@
 #include "input_overlay_ui.h"
 #include "save_state_selector_ui.h"
 #include "scmversion/scmversion.h"
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2869,7 +2871,7 @@ void CommonHostInterface::GetGameInfo(const char* path, CDImage* image, std::str
     if (db_entry)
       *title = db_entry->title;
     else
-      *title = System::GetTitleForPath(path);
+      *title = FileSystem::GetFileTitleFromPath(path);
   }
 }
 
@@ -3299,6 +3301,19 @@ std::unique_ptr<ByteStream> CommonHostInterface::OpenPackageFile(const char* pat
   const u32 real_flags = (flags & allowed_flags) | BYTESTREAM_OPEN_READ;
   Log_DevPrintf("Requesting package file '%s'", path);
   return FileSystem::OpenFile(full_path.c_str(), real_flags);
+}
+
+std::FILE* CommonHostInterface::OpenFile(const char* path, const char* mode, Common::Error* error)
+{
+  std::FILE* fp = FileSystem::OpenCFile(path, mode);
+  if (fp)
+    return fp;
+
+  Log_ErrorPrintf("Failed to open file '%s' with mode '%s': errno %d", path, mode, errno);
+  if (error)
+    error->SetErrno(errno);
+
+  return nullptr;
 }
 
 bool CommonHostInterface::SetControllerNavigationButtonState(FrontendCommon::ControllerNavigationButton button,

@@ -571,21 +571,34 @@ DiscRegion GetRegionForImage(CDImage* cdi)
 
 DiscRegion GetRegionForExe(const char* path)
 {
-  auto fp = FileSystem::OpenManagedCFile(path, "rb");
+  std::FILE* fp = g_host_interface->OpenFile(path, "rb", nullptr);
   if (!fp)
     return DiscRegion::Other;
 
   BIOS::PSEXEHeader header;
-  if (std::fread(&header, sizeof(header), 1, fp.get()) != 1)
+  if (std::fread(&header, sizeof(header), 1, fp) != 1)
+  {
+    std::fclose(fp);
     return DiscRegion::Other;
+  }
 
+  std::fclose(fp);
   return BIOS::GetPSExeDiscRegion(header);
 }
 
 DiscRegion GetRegionForPsf(const char* path)
 {
+  std::FILE* fp = g_host_interface->OpenFile(path, "rb", nullptr);
+  if (!fp)
+    return DiscRegion::Other;
+
+  std::optional<std::vector<u8>> file_data(FileSystem::ReadBinaryFile(fp));
+  std::fclose(fp);
+  if (!file_data.has_value())
+    return DiscRegion::Other;
+
   PSFLoader::File psf;
-  if (!psf.Load(path))
+  if (!psf.Load(path, file_data.value()))
     return DiscRegion::Other;
 
   return psf.GetRegion();
@@ -643,9 +656,18 @@ bool RecreateGPU(GPURenderer renderer, bool update_display /* = true*/)
   return true;
 }
 
+static std::FILE* CDImageOpenCallback(const char* filename, const char* mode, void* context, Common::Error* error)
+{
+  // This might get called outside of our use..
+  if (!g_host_interface)
+    return CDImage::DefaultOpenFileFunction(filename, mode, context, error);
+
+  return g_host_interface->OpenFile(filename, mode, error);
+}
+
 std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, bool force_preload)
 {
-  std::unique_ptr<CDImage> media = CDImage::Open(path, CDImage::DefaultOpenFileFunction, nullptr, error);
+  std::unique_ptr<CDImage> media = CDImage::Open(path, CDImageOpenCallback, nullptr, error);
   if (!media)
     return {};
 
@@ -664,7 +686,7 @@ std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, boo
 
 bool SwitchCDSubImage(CDImage* cdi, u32 index, Common::Error* error)
 {
-  return cdi->SwitchSubImage(index, CDImage::DefaultOpenFileFunction, nullptr, error);
+  return cdi->SwitchSubImage(index, CDImageOpenCallback, nullptr, error);
 }
 
 bool Boot(const SystemBootParameters& params)

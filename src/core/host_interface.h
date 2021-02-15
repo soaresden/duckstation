@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+namespace Common {
+class Error;
+}
+
 enum LOGLEVEL;
 
 class AudioStream;
@@ -145,6 +149,10 @@ public:
   /// Opens a file in the DuckStation "package".
   /// This is the APK for Android builds, or the program directory for standalone builds.
   virtual std::unique_ptr<ByteStream> OpenPackageFile(const char* path, u32 flags) = 0;
+
+  /// Opens a file provided by the user.
+  /// This will usually be a full path, but for Android it may be a content URI.
+  virtual std::FILE* OpenFile(const char* path, const char* mode, Common::Error* error = nullptr) = 0;
 
   virtual void OnRunningGameChanged(const std::string& path, CDImage* image, const std::string& game_code,
                                     const std::string& game_title);
