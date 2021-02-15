@@ -15,7 +15,7 @@ public:
   CDImageM3u();
   ~CDImageM3u() override;
 
-  bool Open(const char* path, Common::Error* Error);
+  bool Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -24,7 +24,8 @@ public:
   u32 GetSubImageCount() const override;
   u32 GetCurrentSubImage() const override;
   std::string GetSubImageMetadata(u32 index, const std::string_view& type) const override;
-  bool SwitchSubImage(u32 index, Common::Error* error) override;
+  bool SwitchSubImage(u32 index, OpenFileFunction open_file = DefaultOpenFileFunction, void* context = nullptr,
+                      Common::Error* error = nullptr) override;
 
 protected:
   bool ReadSectorFromIndex(void* buffer, const Index& index, LBA lba_in_index) override;
@@ -46,16 +47,17 @@ CDImageM3u::CDImageM3u() = default;
 
 CDImageM3u::~CDImageM3u() = default;
 
-bool CDImageM3u::Open(const char* path, Common::Error* error)
+bool CDImageM3u::Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error)
 {
-  std::ifstream ifs(path);
+  // TODO: Switch to open_file
+  std::ifstream ifs(filename);
   if (!ifs.is_open())
   {
-    Log_ErrorPrintf("Failed to open %s", path);
+    Log_ErrorPrintf("Failed to open %s", filename);
     return false;
   }
 
-  m_filename = path;
+  m_filename = filename;
 
   std::vector<std::string> entries;
   std::string line;
@@ -84,7 +86,7 @@ bool CDImageM3u::Open(const char* path, Common::Error* error)
     if (!FileSystem::IsAbsolutePath(entry.filename))
     {
       SmallString absolute_path;
-      FileSystem::BuildPathRelativeToFile(absolute_path, path, entry.filename.c_str());
+      FileSystem::BuildPathRelativeToFile(absolute_path, filename, entry.filename.c_str());
       entry.filename = absolute_path;
     }
 
@@ -92,8 +94,8 @@ bool CDImageM3u::Open(const char* path, Common::Error* error)
     m_entries.push_back(std::move(entry));
   }
 
-  Log_InfoPrintf("Loaded %zu paths from m3u '%s'", m_entries.size(), path);
-  return !m_entries.empty() && SwitchSubImage(0, error);
+  Log_InfoPrintf("Loaded %zu paths from m3u '%s'", m_entries.size(), filename);
+  return !m_entries.empty() && SwitchSubImage(0, open_file, context, error);
 }
 
 bool CDImageM3u::HasNonStandardSubchannel() const
@@ -116,7 +118,8 @@ u32 CDImageM3u::GetCurrentSubImage() const
   return m_current_image_index;
 }
 
-bool CDImageM3u::SwitchSubImage(u32 index, Common::Error* error)
+bool CDImageM3u::SwitchSubImage(u32 index, OpenFileFunction open_file /* = DefaultOpenFileFunction */,
+                                void* context /* = nullptr */, Common::Error* error /* = nullptr */)
 {
   if (index >= m_entries.size())
     return false;
@@ -124,7 +127,7 @@ bool CDImageM3u::SwitchSubImage(u32 index, Common::Error* error)
     return true;
 
   const Entry& entry = m_entries[index];
-  std::unique_ptr<CDImage> new_image = CDImage::Open(entry.filename.c_str(), error);
+  std::unique_ptr<CDImage> new_image = CDImage::Open(entry.filename.c_str(), open_file, context, error);
   if (!new_image)
   {
     Log_ErrorPrintf("Failed to load subimage %u (%s)", index, entry.filename.c_str());
@@ -163,10 +166,11 @@ bool CDImageM3u::ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_
   return m_current_image->ReadSubChannelQ(subq, index, lba_in_index);
 }
 
-std::unique_ptr<CDImage> CDImage::OpenM3uImage(const char* filename, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenM3uImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error)
 {
   std::unique_ptr<CDImageM3u> image = std::make_unique<CDImageM3u>();
-  if (!image->Open(filename, error))
+  if (!image->Open(filename, open_file, context, error))
     return {};
 
   return image;

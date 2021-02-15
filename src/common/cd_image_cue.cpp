@@ -16,7 +16,7 @@ public:
   CDImageCueSheet();
   ~CDImageCueSheet() override;
 
-  bool OpenAndParse(const char* filename, Common::Error* error);
+  bool OpenAndParse(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -46,15 +46,19 @@ CDImageCueSheet::~CDImageCueSheet()
   cd_delete(m_cd);
 }
 
-bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
+bool CDImageCueSheet::OpenAndParse(const char* filename, OpenFileFunction open_file, void* context,
+                                   Common::Error* error)
 {
-  std::optional<std::string> cuesheet_string = FileSystem::ReadFileToString(filename);
+  std::FILE* cue_file = open_file(filename, "rb", context, error);
+  if (!cue_file)
+    return false;
+
+  std::optional<std::string> cuesheet_string(FileSystem::ReadFileToString(cue_file));
+  std::fclose(cue_file);
   if (!cuesheet_string.has_value())
   {
-    Log_ErrorPrintf("Failed to open cuesheet '%s': errno %d", filename, errno);
-    if (error)
-      error->SetErrno(errno);
-
+    Log_ErrorPrintf("Failed to read cuesheet '%s': errno %d", filename, errno);
+    error->SetFormattedMessage("Failed to read cuesheet '%s': errno %d", filename, errno);
     return false;
   }
 
@@ -66,9 +70,7 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
   if (!m_cd)
   {
     Log_ErrorPrintf("Failed to parse cuesheet '%s'", filename);
-    if (error)
-      error->SetMessage("Failed to parse cuesheet");
-
+    error->SetMessage("Failed to parse cuesheet");
     return false;
   }
 
@@ -87,9 +89,7 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
     if (!track || !track_get_filename(track))
     {
       Log_ErrorPrintf("Track/filename missing for track %d", track_num);
-      if (error)
-        error->SetFormattedMessage("Track/filename missing for track %d", track_num);
-
+      error->SetFormattedMessage("Track/filename missing for track %d", track_num);
       return false;
     }
 
@@ -107,7 +107,7 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
     if (track_file_index == m_files.size())
     {
       const std::string track_full_filename(basepath + track_filename);
-      std::FILE* track_fp = FileSystem::OpenCFile(track_full_filename.c_str(), "rb");
+      std::FILE* track_fp = open_file(track_full_filename.c_str(), "rb", context, error);
       if (!track_fp && track_file_index == 0)
       {
         // many users have bad cuesheets, or they're renamed the files without updating the cuesheet.
@@ -125,12 +125,8 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
       {
         Log_ErrorPrintf("Failed to open track filename '%s' (from '%s' and '%s'): errno %d",
                         track_full_filename.c_str(), track_filename.c_str(), filename, errno);
-        if (error)
-        {
-          error->SetFormattedMessage("Failed to open track filename '%s' (from '%s' and '%s'): errno %d",
-                                     track_full_filename.c_str(), track_filename.c_str(), filename, errno);
-        }
-
+        error->SetFormattedMessage("Failed to open track filename '%s' (from '%s' and '%s'): errno %d",
+                                   track_full_filename.c_str(), track_filename.c_str(), filename, errno);
         return false;
       }
 
@@ -160,11 +156,8 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
       {
         Log_ErrorPrintf("Failed to open track %u in '%s': track start is out of range (%ld vs %ld)", track_num,
                         filename, track_start, file_size);
-        if (error)
-        {
-          error->SetFormattedMessage("Failed to open track %u in '%s': track start is out of range (%ld vs %ld)",
-                                     track_num, filename, track_start, file_size);
-        }
+        error->SetFormattedMessage("Failed to open track %u in '%s': track start is out of range (%ld vs %ld)",
+                                   track_num, filename, track_start, file_size);
         return false;
       }
 
@@ -264,8 +257,7 @@ bool CDImageCueSheet::OpenAndParse(const char* filename, Common::Error* error)
   if (m_tracks.empty())
   {
     Log_ErrorPrintf("File '%s' contains no tracks", filename);
-    if (error)
-      error->SetFormattedMessage("File '%s' contains no tracks", filename);
+    error->SetFormattedMessage("File '%s' contains no tracks", filename);
     return false;
   }
 
@@ -314,10 +306,11 @@ bool CDImageCueSheet::ReadSectorFromIndex(void* buffer, const Index& index, LBA 
   return true;
 }
 
-std::unique_ptr<CDImage> CDImage::OpenCueSheetImage(const char* filename, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenCueSheetImage(const char* filename, OpenFileFunction open_file, void* context,
+                                                    Common::Error* error)
 {
   std::unique_ptr<CDImageCueSheet> image = std::make_unique<CDImageCueSheet>();
-  if (!image->OpenAndParse(filename, error))
+  if (!image->OpenAndParse(filename, open_file, context, error))
     return {};
 
   return image;

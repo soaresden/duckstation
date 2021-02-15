@@ -8,6 +8,10 @@
 #include <optional>
 #include <string>
 
+namespace Common {
+class Error;
+}
+
 class ByteStream;
 class CDImage;
 class StateWrapper;
@@ -191,6 +195,10 @@ bool DumpVRAM(const char* filename);
 
 /// Dumps sound RAM to a file.
 bool DumpSPURAM(const char* filename);
+
+/// Opens CD image, preloading if needed.
+std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, bool force_preload);
+bool SwitchCDSubImage(CDImage* cdi, u32 index, Common::Error* error);
 
 bool HasMedia();
 std::string GetMediaFileName();

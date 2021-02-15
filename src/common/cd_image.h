@@ -194,15 +194,28 @@ public:
   // Helper functions.
   static u32 GetBytesPerSector(TrackMode mode);
 
+  // File access callback.
+  using OpenFileFunction = std::FILE* (*)(const char* filename, const char* mode, void* context, Common::Error* error);
+  static std::FILE* DefaultOpenFileFunction(const char* filename, const char* mode, void* context,
+                                            Common::Error* error);
+
   // Opening disc image.
-  static std::unique_ptr<CDImage> Open(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenBinImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenCueSheetImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenCHDImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenEcmImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenMdsImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenPBPImage(const char* filename, Common::Error* error);
-  static std::unique_ptr<CDImage> OpenM3uImage(const char* filename, Common::Error* error);
+  static std::unique_ptr<CDImage> Open(const char* filename, OpenFileFunction open_file = DefaultOpenFileFunction,
+                                       void* context = nullptr, Common::Error* error = nullptr);
+  static std::unique_ptr<CDImage> OpenBinImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
+  static std::unique_ptr<CDImage> OpenCueSheetImage(const char* filename, OpenFileFunction open_file, void* context,
+                                                    Common::Error* error);
+  static std::unique_ptr<CDImage> OpenCHDImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
+  static std::unique_ptr<CDImage> OpenEcmImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
+  static std::unique_ptr<CDImage> OpenMdsImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
+  static std::unique_ptr<CDImage> OpenPBPImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
+  static std::unique_ptr<CDImage> OpenM3uImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error);
   static std::unique_ptr<CDImage>
   CreateMemoryImage(CDImage* image, ProgressCallback* progress = ProgressCallback::NullProgressCallback);
 
@@ -272,7 +285,8 @@ public:
   virtual u32 GetCurrentSubImage() const;
 
   // Changes the current sub-image. If this fails, the image state is unchanged.
-  virtual bool SwitchSubImage(u32 index, Common::Error* error);
+  virtual bool SwitchSubImage(u32 index, OpenFileFunction open_file = DefaultOpenFileFunction, void* context = nullptr,
+                              Common::Error* error = nullptr);
 
   // Retrieve sub-image metadata.
   virtual std::string GetSubImageMetadata(u32 index, const std::string_view& type) const;

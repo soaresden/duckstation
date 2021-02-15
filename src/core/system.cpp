@@ -66,9 +66,6 @@ static bool LoadMemoryState(const MemorySaveState& mss);
 static bool LoadEXE(const char* filename);
 static bool SetExpansionROM(const char* filename);
 
-/// Opens CD image, preloading if needed.
-static std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, bool force_preload);
-
 static bool DoLoadState(ByteStream* stream, bool force_software_renderer, bool update_display);
 static bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display);
 static void DoRunFrame();
@@ -333,7 +330,7 @@ std::string_view GetTitleForPath(const char* path)
 
 std::string GetGameCodeForPath(const char* image_path, bool fallback_to_hash)
 {
-  std::unique_ptr<CDImage> cdi = CDImage::Open(image_path, nullptr);
+  std::unique_ptr<CDImage> cdi = OpenCDImage(image_path, nullptr, false);
   if (!cdi)
     return {};
 
@@ -601,7 +598,7 @@ std::optional<DiscRegion> GetRegionForPath(const char* image_path)
   else if (IsPsfFileName(image_path))
     return GetRegionForPsf(image_path);
 
-  std::unique_ptr<CDImage> cdi = CDImage::Open(image_path, nullptr);
+  std::unique_ptr<CDImage> cdi = OpenCDImage(image_path, nullptr, false);
   if (!cdi)
     return {};
 
@@ -648,7 +645,7 @@ bool RecreateGPU(GPURenderer renderer, bool update_display /* = true*/)
 
 std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, bool force_preload)
 {
-  std::unique_ptr<CDImage> media = CDImage::Open(path, error);
+  std::unique_ptr<CDImage> media = CDImage::Open(path, CDImage::DefaultOpenFileFunction, nullptr, error);
   if (!media)
     return {};
 
@@ -663,6 +660,11 @@ std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, boo
   }
 
   return media;
+}
+
+bool SwitchCDSubImage(CDImage* cdi, u32 index, Common::Error* error)
+{
+  return cdi->SwitchSubImage(index, CDImage::DefaultOpenFileFunction, nullptr, error);
 }
 
 bool Boot(const SystemBootParameters& params)
@@ -769,7 +771,7 @@ bool Boot(const SystemBootParameters& params)
   }
 
   // Switch subimage.
-  if (media && params.media_playlist_index != 0 && !media->SwitchSubImage(params.media_playlist_index, &error))
+  if (media && params.media_playlist_index != 0 && !SwitchCDSubImage(media.get(), params.media_playlist_index, &error))
   {
     g_host_interface->ReportFormattedError("Failed to switch to subimage %u in '%s': %s", params.media_playlist_index,
                                            params.filename.c_str(), error.GetCodeAndMessage().GetCharArray());
@@ -1167,7 +1169,7 @@ bool DoLoadState(ByteStream* state, bool force_software_renderer, bool update_di
     const u32 num_subimages = media->HasSubImages() ? media->GetSubImageCount() : 1;
     if (header.media_subimage_index >= num_subimages ||
         (media->HasSubImages() && media->GetCurrentSubImage() != header.media_subimage_index &&
-         !media->SwitchSubImage(header.media_subimage_index, &error)))
+         !SwitchCDSubImage(media.get(), header.media_subimage_index, &error)))
     {
       g_host_interface->ReportFormattedError(
         g_host_interface->TranslateString("System",
@@ -2002,7 +2004,7 @@ bool SwitchMediaSubImage(u32 index)
   Assert(image);
 
   Common::Error error;
-  if (!image->SwitchSubImage(index, &error))
+  if (!SwitchCDSubImage(image.get(), index, &error))
   {
     g_host_interface->AddFormattedOSDMessage(
       10.0f, g_host_interface->TranslateString("OSDMessage", "Failed to switch to subimage %u in '%s': %s."),

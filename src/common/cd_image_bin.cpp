@@ -12,7 +12,7 @@ public:
   CDImageBin();
   ~CDImageBin() override;
 
-  bool Open(const char* filename, Common::Error* error);
+  bool Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -35,17 +35,12 @@ CDImageBin::~CDImageBin()
     std::fclose(m_fp);
 }
 
-bool CDImageBin::Open(const char* filename, Common::Error* error)
+bool CDImageBin::Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error)
 {
   m_filename = filename;
-  m_fp = FileSystem::OpenCFile(filename, "rb");
+  m_fp = open_file(filename, "rb", context, error);
   if (!m_fp)
-  {
-    Log_ErrorPrintf("Failed to open binfile '%s': errno %d", filename, errno);
-    if (error)
-      error->SetErrno(errno);
     return false;
-  }
 
   const u32 track_sector_size = RAW_SECTOR_SIZE;
 
@@ -133,10 +128,11 @@ bool CDImageBin::ReadSectorFromIndex(void* buffer, const Index& index, LBA lba_i
   return true;
 }
 
-std::unique_ptr<CDImage> CDImage::OpenBinImage(const char* filename, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenBinImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error)
 {
   std::unique_ptr<CDImageBin> image = std::make_unique<CDImageBin>();
-  if (!image->Open(filename, error))
+  if (!image->Open(filename, open_file, context, error))
     return {};
 
   return image;

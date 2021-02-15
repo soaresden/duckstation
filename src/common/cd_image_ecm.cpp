@@ -162,7 +162,7 @@ public:
   CDImageEcm();
   ~CDImageEcm() override;
 
-  bool Open(const char* filename, Common::Error* error);
+  bool Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -222,27 +222,19 @@ CDImageEcm::~CDImageEcm()
     std::fclose(m_fp);
 }
 
-bool CDImageEcm::Open(const char* filename, Common::Error* error)
+bool CDImageEcm::Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error)
 {
   m_filename = filename;
-  m_fp = FileSystem::OpenCFile(filename, "rb");
+  m_fp = open_file(filename, "rb", context, error);
   if (!m_fp)
-  {
-    Log_ErrorPrintf("Failed to open binfile '%s': errno %d", filename, errno);
-    if (error)
-      error->SetErrno(errno);
-
     return false;
-  }
 
   char header[4];
   if (std::fread(header, sizeof(header), 1, m_fp) != 1 || header[0] != 'E' || header[1] != 'C' || header[2] != 'M' ||
       header[3] != 0)
   {
     Log_ErrorPrintf("Failed to read/invalid header");
-    if (error)
-      error->SetMessage("Failed to read/invalid header");
-
+    error->SetMessage("Failed to read/invalid header");
     return false;
   }
 
@@ -257,9 +249,7 @@ bool CDImageEcm::Open(const char* filename, Common::Error* error)
     if (bits == EOF)
     {
       Log_ErrorPrintf("Unexpected EOF after %zu chunks", m_data_map.size());
-      if (error)
-        error->SetFormattedMessage("Unexpected EOF after %zu chunks", m_data_map.size());
-
+      error->SetFormattedMessage("Unexpected EOF after %zu chunks", m_data_map.size());
       return false;
     }
 
@@ -273,9 +263,7 @@ bool CDImageEcm::Open(const char* filename, Common::Error* error)
       if (bits == EOF)
       {
         Log_ErrorPrintf("Unexpected EOF after %zu chunks", m_data_map.size());
-        if (error)
-          error->SetFormattedMessage("Unexpected EOF after %zu chunks", m_data_map.size());
-
+        error->SetFormattedMessage("Unexpected EOF after %zu chunks", m_data_map.size());
         return false;
       }
 
@@ -293,9 +281,7 @@ bool CDImageEcm::Open(const char* filename, Common::Error* error)
     if (count >= 0x80000000u)
     {
       Log_ErrorPrintf("Corrupted header after %zu chunks", m_data_map.size());
-      if (error)
-        error->SetFormattedMessage("Corrupted header after %zu chunks", m_data_map.size());
-
+      error->SetFormattedMessage("Corrupted header after %zu chunks", m_data_map.size());
       return false;
     }
 
@@ -325,9 +311,7 @@ bool CDImageEcm::Open(const char* filename, Common::Error* error)
     if (std::fseek(m_fp, file_offset, SEEK_SET) != 0)
     {
       Log_ErrorPrintf("Failed to seek to offset %u after %zu chunks", file_offset, m_data_map.size());
-      if (error)
-        error->SetFormattedMessage("Failed to seek to offset %u after %zu chunks", file_offset, m_data_map.size());
-
+      error->SetFormattedMessage("Failed to seek to offset %u after %zu chunks", file_offset, m_data_map.size());
       return false;
     }
   }
@@ -335,9 +319,7 @@ bool CDImageEcm::Open(const char* filename, Common::Error* error)
   if (m_data_map.empty())
   {
     Log_ErrorPrintf("No data in image '%s'", filename);
-    if (error)
-      error->SetFormattedMessage("No data in image '%s'", filename);
-
+    error->SetFormattedMessage("No data in image '%s'", filename);
     return false;
   }
 
@@ -523,10 +505,11 @@ bool CDImageEcm::ReadSectorFromIndex(void* buffer, const Index& index, LBA lba_i
   return true;
 }
 
-std::unique_ptr<CDImage> CDImage::OpenEcmImage(const char* filename, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenEcmImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error)
 {
   std::unique_ptr<CDImageEcm> image = std::make_unique<CDImageEcm>();
-  if (!image->Open(filename, error))
+  if (!image->Open(filename, open_file, context, error))
     return {};
 
   return image;

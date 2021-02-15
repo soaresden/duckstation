@@ -23,7 +23,7 @@ public:
   CDImagePBP() = default;
   ~CDImagePBP() override;
 
-  bool Open(const char* filename, Common::Error* error);
+  bool Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -31,7 +31,7 @@ public:
   bool HasSubImages() const override;
   u32 GetSubImageCount() const override;
   u32 GetCurrentSubImage() const override;
-  bool SwitchSubImage(u32 index, Common::Error* error) override;
+  bool SwitchSubImage(u32 index, OpenFileFunction open_file, void* context, Common::Error* error) override;
   std::string GetMetadata(const std::string_view& type) const override;
   std::string GetSubImageMetadata(u32 index, const std::string_view& type) const override;
 
@@ -320,7 +320,7 @@ bool CDImagePBP::IsValidEboot(Common::Error* error)
   return true;
 }
 
-bool CDImagePBP::Open(const char* filename, Common::Error* error)
+bool CDImagePBP::Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error)
 {
   if (!EndianHelper::HostIsLittleEndian())
   {
@@ -328,12 +328,10 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
     return false;
   }
 
-  m_file = FileSystem::OpenCFile(filename, "rb");
+  m_file = open_file(filename, "rb", context, error);
   if (!m_file)
   {
-    if (error)
-      error->SetErrno(errno);
-
+    error->SetErrno(errno);
     return false;
   }
 
@@ -343,8 +341,7 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
   if (!LoadPBPHeader())
   {
     Log_ErrorPrint("Failed to load PBP header");
-    if (error)
-      error->SetMessage("Failed to load PBP header");
+    error->SetMessage("Failed to load PBP header");
     return false;
   }
 
@@ -352,8 +349,7 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
   if (!LoadSFOHeader())
   {
     Log_ErrorPrint("Failed to load SFO header");
-    if (error)
-      error->SetMessage("Failed to load SFO header");
+    error->SetMessage("Failed to load SFO header");
     return false;
   }
 
@@ -361,8 +357,7 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
   if (!LoadSFOIndexTable())
   {
     Log_ErrorPrint("Failed to load SFO index table");
-    if (error)
-      error->SetMessage("Failed to load SFO index table");
+    error->SetMessage("Failed to load SFO index table");
     return false;
   }
 
@@ -370,8 +365,7 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
   if (!LoadSFOTable())
   {
     Log_ErrorPrint("Failed to load SFO table");
-    if (error)
-      error->SetMessage("Failed to load SFO table");
+    error->SetMessage("Failed to load SFO table");
     return false;
   }
 
@@ -408,9 +402,7 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
     if (disc_table[0] == 0x44475000) // "\0PGD"
     {
       Log_ErrorPrintf("Encrypted PBP images are not supported, skipping %s", m_filename.c_str());
-      if (error)
-        error->SetMessage("Encrypted PBP images are not supported");
-
+      error->SetMessage("Encrypted PBP images are not supported");
       return false;
     }
 
@@ -426,6 +418,8 @@ bool CDImagePBP::Open(const char* filename, Common::Error* error)
     if (m_disc_offsets.size() < 2)
     {
       Log_ErrorPrintf("Invalid number of discs (%u) in multi-disc PBP file", static_cast<u32>(m_disc_offsets.size()));
+      error->SetFormattedMessage("Invalid number of discs (%u) in multi-disc PBP file",
+                                 static_cast<u32>(m_disc_offsets.size()));
       return false;
     }
   }
@@ -466,6 +460,7 @@ bool CDImagePBP::OpenDisc(u32 index, Common::Error* error)
   if (strncmp(iso_header_magic, "PSISOIMG0000", 12) != 0)
   {
     Log_ErrorPrint("ISO header magic number mismatch");
+    error->SetMessage("ISO header magic number mismatch");
     return false;
   }
 
@@ -480,9 +475,7 @@ bool CDImagePBP::OpenDisc(u32 index, Common::Error* error)
   if (pgd_magic == 0x44475000) // "\0PGD"
   {
     Log_ErrorPrintf("Encrypted PBP images are not supported, skipping %s", m_filename.c_str());
-    if (error)
-      error->SetMessage("Encrypted PBP images are not supported");
-
+    error->SetMessage("Encrypted PBP images are not supported");
     return false;
   }
 
@@ -542,6 +535,7 @@ bool CDImagePBP::OpenDisc(u32 index, Common::Error* error)
   if (first_track != 1 || last_track < first_track)
   {
     Log_ErrorPrint("Invalid starting track number or track count");
+    error->SetMessage("Invalid starting track number or track count");
     return false;
   }
 
@@ -581,6 +575,8 @@ bool CDImagePBP::OpenDisc(u32 index, Common::Error* error)
       {
         Log_ErrorPrintf("Invalid TOC entry at index %u, user data (%u) should not start before pregap (%u)",
                         static_cast<u32>(curr_track), userdata_start, pregap_start);
+        error->SetFormattedMessage("Invalid TOC entry at index %u, user data (%u) should not start before pregap (%u)",
+                                   static_cast<u32>(curr_track), userdata_start, pregap_start);
         return false;
       }
 
@@ -855,7 +851,7 @@ u32 CDImagePBP::GetCurrentSubImage() const
   return m_current_disc;
 }
 
-bool CDImagePBP::SwitchSubImage(u32 index, Common::Error* error)
+bool CDImagePBP::SwitchSubImage(u32 index, OpenFileFunction open_file, void* context, Common::Error* error)
 {
   if (index >= m_disc_offsets.size())
     return false;
@@ -883,10 +879,11 @@ std::string CDImagePBP::GetSubImageMetadata(u32 index, const std::string_view& t
   return CDImage::GetSubImageMetadata(index, type);
 }
 
-std::unique_ptr<CDImage> CDImage::OpenPBPImage(const char* filename, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenPBPImage(const char* filename, OpenFileFunction open_file, void* context,
+                                               Common::Error* error)
 {
   std::unique_ptr<CDImagePBP> image = std::make_unique<CDImagePBP>();
-  if (!image->Open(filename, error))
+  if (!image->Open(filename, open_file, context, error))
     return {};
 
   return image;

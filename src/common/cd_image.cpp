@@ -1,8 +1,10 @@
 #include "cd_image.h"
 #include "assert.h"
+#include "error.h"
 #include "file_system.h"
 #include "log.h"
 #include <array>
+#include <cerrno>
 Log_SetChannel(CDImage);
 
 CDImage::CDImage() = default;
@@ -15,7 +17,20 @@ u32 CDImage::GetBytesPerSector(TrackMode mode)
   return sizes[static_cast<u32>(mode)];
 }
 
-std::unique_ptr<CDImage> CDImage::Open(const char* filename, Common::Error* error)
+std::FILE* CDImage::DefaultOpenFileFunction(const char* filename, const char* mode, void* context, Common::Error* error)
+{
+  std::FILE* fp = FileSystem::OpenCFile(filename, mode);
+  if (fp)
+    return fp;
+
+  Log_ErrorPrintf("Failed to open CD image file '%s': errno %d", filename, errno);
+
+  error->SetErrno(errno);
+  return nullptr;
+}
+
+std::unique_ptr<CDImage> CDImage::Open(const char* filename, OpenFileFunction open_file /* = DefaultOpenFileFunction */,
+                                       void* context /* = nullptr */, Common::Error* error /* = nullptr */)
 {
   const char* extension = std::strrchr(filename, '.');
   if (!extension)
@@ -30,34 +45,38 @@ std::unique_ptr<CDImage> CDImage::Open(const char* filename, Common::Error* erro
 #define CASE_COMPARE strcasecmp
 #endif
 
+  Common::Error default_error;
+  if (!error)
+    error = &default_error;
+
   if (CASE_COMPARE(extension, ".cue") == 0)
   {
-    return OpenCueSheetImage(filename, error);
+    return OpenCueSheetImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".bin") == 0 || CASE_COMPARE(extension, ".img") == 0 ||
            CASE_COMPARE(extension, ".iso") == 0)
   {
-    return OpenBinImage(filename, error);
+    return OpenBinImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".chd") == 0)
   {
-    return OpenCHDImage(filename, error);
+    return OpenCHDImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".ecm") == 0)
   {
-    return OpenEcmImage(filename, error);
+    return OpenEcmImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".mds") == 0)
   {
-    return OpenMdsImage(filename, error);
+    return OpenMdsImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".pbp") == 0)
   {
-    return OpenPBPImage(filename, error);
+    return OpenPBPImage(filename, open_file, context, error);
   }
   else if (CASE_COMPARE(extension, ".m3u") == 0)
   {
-    return OpenM3uImage(filename, error);
+    return OpenM3uImage(filename, open_file, context, error);
   }
 
 #undef CASE_COMPARE
@@ -297,7 +316,8 @@ u32 CDImage::GetCurrentSubImage() const
   return 0;
 }
 
-bool CDImage::SwitchSubImage(u32 index, Common::Error* error)
+bool CDImage::SwitchSubImage(u32 index, OpenFileFunction open_file /* = DefaultOpenFileFunction */,
+                             void* context /* = nullptr */, Common::Error* error /* = nullptr */)
 {
   return false;
 }

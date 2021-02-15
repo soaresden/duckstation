@@ -154,7 +154,7 @@ bool GameList::GetGameListEntry(const std::string& path, GameListEntry* entry)
   if (System::IsPsfFileName(path.c_str()))
     return GetPsfListEntry(path.c_str(), entry);
 
-  std::unique_ptr<CDImage> cdi = CDImage::Open(path.c_str(), nullptr);
+  std::unique_ptr<CDImage> cdi = System::OpenCDImage(path.c_str(), nullptr, false);
   if (!cdi)
     return false;
 
@@ -217,7 +217,7 @@ bool GameList::GetGameListEntry(const std::string& path, GameListEntry* entry)
     const u32 subimage_count = cdi->GetSubImageCount();
     for (u32 i = 1; i < subimage_count; i++)
     {
-      if (!cdi->SwitchSubImage(i, nullptr))
+      if (!System::SwitchCDSubImage(cdi.get(), i, nullptr))
       {
         Log_ErrorPrintf("Failed to switch to subimage %u in '%s'", i, entry->path.c_str());
         continue;
