@@ -305,19 +305,15 @@ public class EmulationActivity extends AppCompatActivity implements SurfaceHolde
                 applySettings();
             }
         } else if (requestCode == REQUEST_IMPORT_PATCH_CODES) {
-            if (data == null)
+            if (data == null || data.getData() == null)
                 return;
 
             importPatchesFromFile(data.getData());
         } else if (requestCode == REQUEST_CHANGE_DISC_FILE) {
-            if (data == null)
+            if (data == null || data.getData() == null)
                 return;
 
-            String path = GameDirectoriesActivity.getPathFromUri(this, data.getData());
-            if (path == null)
-                return;
-
-            AndroidHostInterface.getInstance().setMediaFilename(path);
+            AndroidHostInterface.getInstance().setMediaFilename(data.getData().toString());
         }
     }
 

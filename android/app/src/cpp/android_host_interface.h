@@ -39,6 +39,7 @@ public:
   void ReportMessage(const char* message) override;
 
   std::unique_ptr<ByteStream> OpenPackageFile(const char* path, u32 flags) override;
+  std::FILE* OpenFile(const char* path, const char* mode, Common::Error* error) override;
 
   bool IsEmulationThreadRunning() const { return m_emulation_thread_running.load(); }
   bool IsEmulationThreadPaused() const;

@@ -40,6 +40,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
@@ -159,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Set up game list view.
-        mGameList = new GameList(this);
+        mGameList = new GameList();
         mGameList.addRefreshListener(() -> updateGameListFragment(true));
         mGameListFragment = new GameListFragment(this);
         mGameGridFragment = new GameGridFragment(this);
@@ -195,6 +197,7 @@ public class MainActivity extends AppCompatActivity {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         i.addCategory(Intent.CATEGORY_DEFAULT);
         i.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+        i.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(Intent.createChooser(i, getString(R.string.main_activity_choose_directory)),
                 REQUEST_ADD_DIRECTORY_TO_GAME_LIST);
     }
@@ -273,11 +276,9 @@ public class MainActivity extends AppCompatActivity {
                 if (resultCode != RESULT_OK)
                     return;
 
-                String path = GameDirectoriesActivity.getPathFromTreeUri(this, data.getData());
-                if (path == null)
-                    return;
-
-                GameDirectoriesActivity.addSearchDirectory(this, path, true);
+                final Uri uri = data.getData();
+                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                GameDirectoriesActivity.addSearchDirectory(this, uri.toString(), true);
                 mGameList.refresh(false, false, this);
             }
             break;
@@ -291,14 +292,17 @@ public class MainActivity extends AppCompatActivity {
             break;
 
             case REQUEST_START_FILE: {
-                if (resultCode != RESULT_OK)
+                if (resultCode != RESULT_OK || data.getData() == null)
                     return;
 
-                String path = GameDirectoriesActivity.getPathFromUri(this, data.getData());
-                if (path == null)
-                    return;
+                final String encodedUri = data.getData().toString();
+                try {
+                    final String decodedUri = URLDecoder.decode(encodedUri, "utf-8");
+                    startEmulation(decodedUri, shouldResumeStateByDefault());
+                } catch (UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                }
 
-                startEmulation(path, shouldResumeStateByDefault());
             }
             break;
 

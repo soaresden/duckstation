@@ -7,6 +7,8 @@ import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
 
+import java.net.URLDecoder;
+
 public class GameListEntry {
     public enum EntryType {
         Disc,
@@ -35,12 +37,44 @@ public class GameListEntry {
     private CompatibilityRating mCompatibilityRating;
     private String mCoverPath;
 
-    public GameListEntry(String path, String code, String title, String fileTitle, long size, String modifiedTime, String region,
+    public static String getFileNameForPath(String path) {
+        String newPath = path;
+        int lastSlash;
+        if (path.startsWith("content://") || path.startsWith("file://")) {
+            try {
+                newPath = URLDecoder.decode(path, "UTF-8");
+            } catch (Exception e) {
+            }
+
+            final int lastColon = newPath.lastIndexOf(':');
+            lastSlash = newPath.lastIndexOf('/');
+            if (lastColon >= 0 && lastColon > lastSlash)
+                lastSlash = lastColon;
+        } else {
+            lastSlash = path.lastIndexOf('/');
+        }
+
+        if (lastSlash >= 0)
+            newPath = newPath.substring(lastSlash + 1);
+
+        return newPath;
+    }
+
+    private String getFileTitle(String path) {
+        final String newPath = getFileNameForPath(path);
+        final int extensionPos = newPath.lastIndexOf('.');
+        if (extensionPos >= 0)
+            return newPath.substring(0, extensionPos);
+        else
+            return newPath;
+    }
+
+    public GameListEntry(String path, String code, String title, long size, String modifiedTime, String region,
                          String type, String compatibilityRating, String coverPath) {
         mPath = path;
         mCode = code;
         mTitle = title;
-        mFileTitle = fileTitle;
+        mFileTitle = getFileNameForPath(path);
         mSize = size;
         mModifiedTime = modifiedTime;
         mCoverPath = coverPath;
@@ -101,12 +135,4 @@ public class GameListEntry {
     public String getCoverPath() { return mCoverPath; }
 
     public void setCoverPath(String coverPath) { mCoverPath = coverPath; }
-
-    public static String getFileNameForPath(String path) {
-        int lastSlash = path.lastIndexOf('/');
-        if (lastSlash > 0 && lastSlash < path.length() - 1)
-            return path.substring(lastSlash + 1);
-        else
-            return path;
-    }
 }
