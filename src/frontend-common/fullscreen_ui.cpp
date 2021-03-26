@@ -666,20 +666,20 @@ static void DoChangeDiscFromFile()
 
 static void DoChangeDisc()
 {
-  const u32 playlist_count = System::GetMediaPlaylistCount();
-  if (playlist_count == 0)
+  if (!System::HasMediaSubImages())
   {
     DoChangeDiscFromFile();
     return;
   }
 
-  const u32 current_index = (playlist_count > 0) ? System::GetMediaPlaylistIndex() : 0;
+  const u32 current_index = System::GetMediaSubImageIndex();
+  const u32 count = System::GetMediaSubImageCount();
   ImGuiFullscreen::ChoiceDialogOptions options;
-  options.reserve(playlist_count + 1);
+  options.reserve(count + 1);
   options.emplace_back("From File...", false);
 
-  for (u32 i = 0; i < playlist_count; i++)
-    options.emplace_back(System::GetMediaPlaylistPath(i), i == current_index);
+  for (u32 i = 0; i < count; i++)
+    options.emplace_back(System::GetMediaSubImageTitle(i), i == current_index);
 
   auto callback = [](s32 index, const std::string& title, bool checked) {
     if (index < 0)
@@ -690,7 +690,7 @@ static void DoChangeDisc()
       return;
     }
 
-    System::SwitchMediaFromPlaylist(static_cast<u32>(index - 1));
+    System::SwitchMediaSubImage(static_cast<u32>(index - 1));
     CloseChoiceDialog();
   };
 
