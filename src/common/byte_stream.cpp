@@ -13,6 +13,7 @@
 #include "windows_headers.h"
 #include <direct.h>
 #include <io.h>
+#include <malloc.h>
 #include <share.h>
 #else
 #include <sys/stat.h>
