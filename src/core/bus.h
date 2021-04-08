@@ -102,7 +102,7 @@ bool DoState(StateWrapper& sw);
 CPUFastmemMode GetFastmemMode();
 u8* GetFastmemBase();
 void UpdateFastmemViews(CPUFastmemMode mode);
-bool CanUseFastmemForAddress(VirtualMemoryAddress address);
+bool CanUseFastmemForAddress(VirtualMemoryAddress address, bool is_write);
 
 void SetExpansionROM(std::vector<u8> data);
 void SetBIOS(const std::vector<u8>& image);

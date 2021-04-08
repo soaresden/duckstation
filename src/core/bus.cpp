@@ -453,9 +453,13 @@ void UpdateFastmemViews(CPUFastmemMode mode)
   MapRAM(0xA0600000);
 }
 
-bool CanUseFastmemForAddress(VirtualMemoryAddress address)
+bool CanUseFastmemForAddress(VirtualMemoryAddress address, bool is_write)
 {
   const PhysicalMemoryAddress paddr = address & CPU::PHYSICAL_MEMORY_ADDRESS_MASK;
+
+  // Disable fastmem for code pages, since we'll end up faulting on them.
+  if (is_write && IsRAMAddress(paddr) && IsRAMCodePage(GetRAMCodePageIndex(paddr)))
+    return false;
 
   switch (m_fastmem_mode)
   {
