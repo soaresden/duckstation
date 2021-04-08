@@ -264,6 +264,7 @@ private:
   {
     std::array<SpeculativeValue, static_cast<u8>(Reg::count)> regs;
     std::unordered_map<PhysicalMemoryAddress, SpeculativeValue> memory;
+    SpeculativeValue cop0_sr;
   };
 
   void InitSpeculativeRegs();
@@ -272,6 +273,7 @@ private:
   void SpeculativeWriteReg(Reg reg, SpeculativeValue value);
   SpeculativeValue SpeculativeReadMemory(u32 address);
   void SpeculativeWriteMemory(VirtualMemoryAddress address, SpeculativeValue value);
+  bool SpeculativeIsCacheIsolated();
 
   SpeculativeConstants m_speculative_constants;
 };
