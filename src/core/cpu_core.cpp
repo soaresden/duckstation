@@ -1165,22 +1165,22 @@ restart_instruction:
     case InstructionOp::sb:
     {
       const VirtualMemoryAddress addr = ReadReg(inst.i.rs) + inst.i.imm_sext32();
-      const u8 value = Truncate8(ReadReg(inst.i.rt));
+      const u32 value = ReadReg(inst.i.rt);
       WriteMemoryByte(addr, value);
 
       if constexpr (pgxp_mode >= PGXPMode::Memory)
-        PGXP::CPU_SB(inst.bits, value, addr);
+        PGXP::CPU_SB(inst.bits, Truncate8(value), addr);
     }
     break;
 
     case InstructionOp::sh:
     {
       const VirtualMemoryAddress addr = ReadReg(inst.i.rs) + inst.i.imm_sext32();
-      const u16 value = Truncate16(ReadReg(inst.i.rt));
+      const u32 value = ReadReg(inst.i.rt);
       WriteMemoryHalfWord(addr, value);
 
       if constexpr (pgxp_mode >= PGXPMode::Memory)
-        PGXP::CPU_SH(inst.bits, value, addr);
+        PGXP::CPU_SH(inst.bits, Truncate16(value), addr);
     }
     break;
 

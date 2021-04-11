@@ -2053,7 +2053,7 @@ void CodeGenerator::EmitLoadGuestMemorySlowmem(const CodeBlockInstruction& cbi, 
   }
 }
 
-void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi, const Value& address,
+void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi, const Value& address, RegSize size,
                                                 const Value& value)
 {
   // fastmem
@@ -2078,7 +2078,7 @@ void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi,
 
     m_register_cache.InhibitAllocation();
 
-    switch (value.size)
+    switch (size)
     {
       case RegSize_8:
       {
@@ -2184,7 +2184,7 @@ void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi,
                 m_emit->qword[GetFastmemBasePtrReg() + GetHostReg64(RARG1) * 8 + (Bus::FASTMEM_LUT_NUM_PAGES * 8)]);
     bpi.host_pc = GetCurrentNearCodePointer();
 
-    switch (value.size)
+    switch (size)
     {
       case RegSize_8:
       {
@@ -2230,7 +2230,7 @@ void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi,
   bpi.host_slowmem_pc = GetCurrentFarCodePointer();
   SwitchToFarCode();
 
-  EmitStoreGuestMemorySlowmem(cbi, address, value, true);
+  EmitStoreGuestMemorySlowmem(cbi, address, size, value, true);
 
   // return to the block code
   m_emit->jmp(GetCurrentNearCodePointer());
@@ -2241,7 +2241,7 @@ void CodeGenerator::EmitStoreGuestMemoryFastmem(const CodeBlockInstruction& cbi,
   m_block->loadstore_backpatch_info.push_back(bpi);
 }
 
-void CodeGenerator::EmitStoreGuestMemorySlowmem(const CodeBlockInstruction& cbi, const Value& address,
+void CodeGenerator::EmitStoreGuestMemorySlowmem(const CodeBlockInstruction& cbi, const Value& address, RegSize size,
                                                 const Value& value, bool in_far_code)
 {
   if (g_settings.cpu_recompiler_memory_exceptions)
@@ -2249,7 +2249,7 @@ void CodeGenerator::EmitStoreGuestMemorySlowmem(const CodeBlockInstruction& cbi,
     Assert(!in_far_code);
 
     Value result = m_register_cache.AllocateScratch(RegSize_32);
-    switch (value.size)
+    switch (size)
     {
       case RegSize_8:
         EmitFunctionCall(&result, &Thunks::WriteMemoryByte, address, value);
@@ -2292,7 +2292,7 @@ void CodeGenerator::EmitStoreGuestMemorySlowmem(const CodeBlockInstruction& cbi,
   }
   else
   {
-    switch (value.size)
+    switch (size)
     {
       case RegSize_8:
         EmitFunctionCall(nullptr, &Thunks::UncheckedWriteMemoryByte, address, value);
