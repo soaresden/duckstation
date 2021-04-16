@@ -1,11 +1,12 @@
 #include "assert.h"
 #include "cd_image.h"
 #include "cd_subchannel_replacement.h"
+#include "error.h"
 #include "file_system.h"
 #include "log.h"
 #include <algorithm>
 #include <cerrno>
-#include <fstream>
+#include <sstream>
 #include <map>
 Log_SetChannel(CDImageMemory);
 
@@ -49,14 +50,19 @@ CDImageM3u::~CDImageM3u() = default;
 
 bool CDImageM3u::Open(const char* filename, OpenFileFunction open_file, void* context, Common::Error* error)
 {
-  // TODO: Switch to open_file
-  std::ifstream ifs(filename);
-  if (!ifs.is_open())
+  std::FILE* fp = open_file(filename, "rb", context, error);
+  if (!fp)
+    return false;
+
+  std::optional<std::string> cue_file(FileSystem::ReadFileToString(fp));
+  std::fclose(fp);
+  if (!cue_file.has_value() || cue_file->empty())
   {
-    Log_ErrorPrintf("Failed to open %s", filename);
+    error->SetMessage("Failed to read cue sheet");
     return false;
   }
 
+  std::istringstream ifs(cue_file.value());
   m_filename = filename;
 
   std::vector<std::string> entries;
@@ -81,14 +87,12 @@ bool CDImageM3u::Open(const char* filename, OpenFileFunction open_file, void* co
       continue;
 
     Entry entry;
-    entry.filename.assign(line.begin() + start_offset, line.begin() + end_offset + 1);
-    entry.title = FileSystem::GetFileTitleFromPath(entry.filename);
-    if (!FileSystem::IsAbsolutePath(entry.filename))
-    {
-      SmallString absolute_path;
-      FileSystem::BuildPathRelativeToFile(absolute_path, filename, entry.filename.c_str());
-      entry.filename = absolute_path;
-    }
+    std::string entry_filename(line.begin() + start_offset, line.begin() + end_offset + 1);
+    entry.title = FileSystem::GetFileTitleFromPath(entry_filename);
+    if (!FileSystem::IsAbsolutePath(entry_filename))
+      entry.filename = FileSystem::BuildRelativePath(filename, entry_filename);
+    else
+      entry.filename = std::move(entry_filename);
 
     Log_DevPrintf("Read path from m3u: '%s'", entry.filename.c_str());
     m_entries.push_back(std::move(entry));

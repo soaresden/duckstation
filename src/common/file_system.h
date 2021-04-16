@@ -133,6 +133,7 @@ void BuildPathRelativeToFile(String& Destination, const char* CurrentFileName, c
                              bool OSPath = true, bool Canonicalize = true);
 String BuildPathRelativeToFile(const char* CurrentFileName, const char* NewFileName, bool OSPath = true,
                                bool Canonicalize = true);
+std::string BuildRelativePath(const std::string_view& filename, const std::string_view& new_filename);
 
 // sanitizes a filename for use in a filesystem.
 void SanitizeFileName(char* Destination, u32 cbDestination, const char* FileName, bool StripSlashes = true);

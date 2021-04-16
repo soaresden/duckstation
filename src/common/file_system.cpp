@@ -283,13 +283,48 @@ std::string ReplaceExtension(const std::string_view& path, const std::string_vie
   return ret;
 }
 
+static std::string_view::size_type GetLastSeperatorPosition(const std::string_view& filename, bool include_separator)
+{
+  std::string_view::size_type last_separator = filename.rfind('/');
+  if (include_separator && last_separator != std::string_view::npos)
+    last_separator++;
+
+#if defined(_WIN32)
+  std::string_view::size_type other_last_separator = filename.rfind('\\');
+  if (other_last_separator != std::string_view::npos)
+  {
+    if (include_separator)
+      other_last_separator++;
+    if (last_separator == std::string_view::npos || other_last_separator > last_separator)
+      last_separator = other_last_separator;
+  }
+
+#elif defined(__ANDROID__)
+  // scoped storage rubbish
+  std::string_view::size_type other_last_separator = filename.rfind("%2F");
+  if (other_last_separator != std::string_view::npos)
+  {
+    if (include_separator)
+      other_last_separator += 3;
+    if (last_separator == std::string_view::npos || other_last_separator > last_separator)
+      last_separator = other_last_separator;
+  }
+  std::string_view::size_type lower_other_last_separator = filename.rfind("%2f");
+  if (lower_other_last_separator != std::string_view::npos)
+  {
+    if (include_separator)
+      lower_other_last_separator += 3;
+    if (last_separator == std::string_view::npos || lower_other_last_separator > last_separator)
+      last_separator = lower_other_last_separator;
+  }
+#endif
+
+  return last_separator;
+}
+
 std::string_view GetPathDirectory(const std::string_view& path)
 {
-#ifdef _WIN32
-  std::string::size_type pos = path.find_last_of("/\\");
-#else
-  std::string::size_type pos = path.find_last_of("/");
-#endif
+  std::string::size_type pos = GetLastSeperatorPosition(path, false);
   if (pos == std::string_view::npos)
     return {};
 
@@ -298,15 +333,11 @@ std::string_view GetPathDirectory(const std::string_view& path)
 
 std::string_view GetFileNameFromPath(const std::string_view& path)
 {
-#ifdef _WIN32
-  std::string::size_type pos = path.find_last_of("/\\");
-#else
-  std::string::size_type pos = path.find_last_of("/");
-#endif
+  std::string::size_type pos = GetLastSeperatorPosition(path, true);
   if (pos == std::string_view::npos)
     return path;
 
-  return path.substr(pos + 1);
+  return path.substr(pos);
 }
 
 std::string_view GetFileTitleFromPath(const std::string_view& path)
@@ -448,6 +479,16 @@ String BuildPathRelativeToFile(const char* CurrentFileName, const char* NewFileN
   String ret;
   BuildPathRelativeToFile(ret, CurrentFileName, NewFileName, OSPath, Canonicalize);
   return ret;
+}
+
+std::string BuildRelativePath(const std::string_view& filename, const std::string_view& new_filename)
+{
+  std::string new_string;
+  std::string_view::size_type pos = GetLastSeperatorPosition(filename, true);
+  if (pos != std::string_view::npos)
+    new_string.assign(filename, 0, pos);
+  new_string.append(new_filename);
+  return new_string;
 }
 
 std::unique_ptr<ByteStream> OpenFile(const char* FileName, u32 Flags)
