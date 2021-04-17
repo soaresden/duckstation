@@ -239,38 +239,6 @@ public class GameDirectoriesActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    public static String getPathFromTreeUri(Context context, Uri treeUri) {
-        String path = FileUtil.getFullPathFromTreeUri(treeUri, context);
-        if (path.length() < 5) {
-            new AlertDialog.Builder(context)
-                    .setTitle(R.string.main_activity_error)
-                    .setMessage(R.string.main_activity_get_path_from_directory_error)
-                    .setPositiveButton(R.string.main_activity_ok, (dialog, button) -> {
-                    })
-                    .create()
-                    .show();
-            return null;
-        }
-
-        return path;
-    }
-
-    public static String getPathFromUri(Context context, Uri uri) {
-        String path = FileUtil.getFullPathFromUri(uri, context);
-        if (path.length() < 5) {
-            new AlertDialog.Builder(context)
-                    .setTitle(R.string.main_activity_error)
-                    .setMessage(R.string.main_activity_get_path_from_file_error)
-                    .setPositiveButton(R.string.main_activity_ok, (dialog, button) -> {
-                    })
-                    .create()
-                    .show();
-            return null;
-        }
-
-        return path;
-    }
-
     public static void addSearchDirectory(Context context, String path, boolean recursive) {
         final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         final String key = recursive ? "GameList/RecursivePaths" : "GameList/Paths";
@@ -318,14 +286,10 @@ public class GameDirectoriesActivity extends AppCompatActivity {
 
         switch (requestCode) {
             case REQUEST_ADD_DIRECTORY_TO_GAME_LIST: {
-                if (resultCode != RESULT_OK)
+                if (resultCode != RESULT_OK || data.getData() == null)
                     return;
 
-                String path = getPathFromTreeUri(this, data.getData());
-                if (path == null)
-                    return;
-
-                addSearchDirectory(this, path, true);
+                addSearchDirectory(this, data.getDataString(), true);
                 mDirectoryListAdapter.reload();
             }
             break;
