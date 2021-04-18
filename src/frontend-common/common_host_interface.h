@@ -183,6 +183,9 @@ public:
   /// Saves the current emulation state to a file. Specifying a slot of -1 saves the "resume" save state.
   bool SaveState(bool global, s32 slot);
 
+  /// Saves screenshot on side of save state
+  bool SaveStateScreenShot(const char* filename);
+
   /// Returns true if the specified file/disc image is resumable.
   bool CanResumeSystemFromFile(const char* filename);
 

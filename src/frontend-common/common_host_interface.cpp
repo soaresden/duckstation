@@ -35,6 +35,8 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <fstream>
+#include <iostream>
 
 #ifdef WITH_SDL2
 #include "sdl_audio_stream.h"
@@ -711,6 +713,45 @@ bool CommonHostInterface::SaveState(bool global, s32 slot)
   std::string save_path = global ? GetGlobalSaveStateFileName(slot) : GetGameSaveStateFileName(code.c_str(), slot);
   if (!SaveState(save_path.c_str()))
     return false;
+
+  // DEBUT AJOUT FCA
+  std::map<std::string, std::string> confMap;
+
+  std::string file = GetUserDirectoryRelativePath("savestates" FS_OSPATH_SEPARATOR_STR "savestates.index");
+
+  std::string line;
+  std::ifstream systemConf(file);
+  if (systemConf && systemConf.is_open())
+  {
+    while (std::getline(systemConf, line))
+    {
+      int idx = line.find("=");
+      if (idx == std::string::npos || line.find("#") == 0 || line.find(";") == 0)
+        continue;
+
+      std::string key = line.substr(0, idx);
+      std::string value = line.substr(idx + 1);
+      if (!key.empty() && !value.empty())
+        confMap[key] = line.substr(idx + 1);
+    }
+    systemConf.close();
+  }
+
+  std::string romName = FileSystem::GetFileTitleFromPath(System::GetRunningPath()).data();
+  std::size_t lastindex = romName.find_last_of(".");
+  std::string rawname = romName.substr(0, lastindex); 
+
+  confMap[rawname] = code;
+
+  std::ofstream fileout(file); // Temporary file
+  if (fileout)
+  {
+    for (auto line : confMap)
+      fileout << line.first << "=" << line.second << "\n";
+
+    fileout.close();
+  }
+  // FIN AJOUT FCA
 
   OnSystemStateSaved(global, slot);
   return true;

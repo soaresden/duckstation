@@ -1224,6 +1224,13 @@ bool DoLoadState(ByteStream* state, bool force_software_renderer, bool update_di
   return true;
 }
 
+bool SaveStateScreenShot(const char* filename)
+{
+  std::string png_extension = ".png";
+  std::string png_filename = filename + png_extension;
+  return g_host_interface->GetDisplay()->WriteScreenshotToFile(png_filename.c_str(), true);
+}
+
 bool SaveState(ByteStream* state, u32 screenshot_size /* = 128 */)
 {
   if (IsShutdown())
@@ -1258,6 +1265,19 @@ bool SaveState(ByteStream* state, u32 screenshot_size /* = 128 */)
     if (g_host_interface->GetDisplay()->WriteDisplayTextureToBuffer(&screenshot_buffer, screenshot_size,
                                                                     screenshot_size) &&
         !screenshot_buffer.empty())
+
+    // export to png
+    {
+    std::string romName = FileSystem::GetFileNameFromPath(System::GetRunningPath()).data();
+    std::size_t lastindex = romName.find_last_of(".");
+    std::string rawname = romName.substr(0, lastindex); 
+
+    const std::string savestates_dir(g_host_interface->GetUserDirectoryRelativePath("savestates"));
+    std::string fullpngpath = savestates_dir + FS_OSPATH_SEPARATOR_STR + rawname;
+
+    SaveStateScreenShot(fullpngpath.c_str());
+    }
+
     {
       header.offset_to_screenshot = static_cast<u32>(state->GetPosition());
       header.screenshot_width = screenshot_size;
@@ -1294,6 +1314,15 @@ bool SaveState(ByteStream* state, u32 screenshot_size /* = 128 */)
     return false;
   }
 
+  return true;
+}
+
+bool replace(std::string& str, const std::string& from, const std::string& to)
+{
+  size_t start_pos = str.find(from);
+  if (start_pos == std::string::npos)
+    return false;
+  str.replace(start_pos, from.length(), to);
   return true;
 }
 
